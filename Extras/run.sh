@@ -33,19 +33,11 @@ ex_vps() {
     hn_pause
 }
 
-ex_24x7() {
-    hn_clear
-    hn_info "Launching 24/7 Activity Generator..."
-    bash <(curl -fsSL "$EXTRAS_URL/24x7.sh")
-    hn_pause
-}
-
 while true; do
     ex_header
     echo -e " ${G} 1)${NC} Docker"
     echo -e " ${G} 2)${NC} LXC/LXD"
     echo -e " ${G} 3)${NC} VPS Setup ${DG}(LXDE/RDP, PufferPanel, Node.js)${NC}"
-    echo -e " ${G} 4)${NC} 24/7 Activity ${DG}(VPS Idle Prevention)${NC}"
     echo -e " ${R} 0)${NC} Back${NC}"
     echo -e "${DG}────────────────────────────────────────${NC}"
     read -rp "Select → " im
@@ -54,7 +46,6 @@ while true; do
         1) ex_docker ;;
         2) ex_lxd ;;
         3) ex_vps ;;
-        4) ex_24x7 ;;
         0) clear; exit 0 ;;
         *) hn_err "Invalid option!"; hn_pause ;;
     esac
