@@ -26,18 +26,10 @@ ex_lxd() {
     hn_pause
 }
 
-ex_vps() {
-    hn_clear
-    hn_info "Launching HAPPY-NODE VPS Setup..."
-    bash <(curl -fsSL "$HN_BASE_URL/Extras/vps-setup.sh")
-    hn_pause
-}
-
 while true; do
     ex_header
     echo -e " ${G} 1)${NC} Docker"
     echo -e " ${G} 2)${NC} LXC/LXD"
-    echo -e " ${G} 3)${NC} VPS Setup ${DG}(LXDE/RDP, PufferPanel, Node.js)${NC}"
     echo -e " ${R} 0)${NC} Back${NC}"
     echo -e "${DG}────────────────────────────────────────${NC}"
     read -rp "Select → " im
@@ -45,7 +37,6 @@ while true; do
     case "$im" in
         1) ex_docker ;;
         2) ex_lxd ;;
-        3) ex_vps ;;
         0) clear; exit 0 ;;
         *) hn_err "Invalid option!"; hn_pause ;;
     esac
