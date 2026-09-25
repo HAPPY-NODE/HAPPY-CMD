@@ -61,7 +61,11 @@ detect_system() {
     else
         HN_RAM="N/A"
     fi
-    HN_LOAD="$(uptime | awk -F'load average:' '{print $2}' | xargs)"
+    if command -v uptime >/dev/null 2>&1; then
+        HN_LOAD="$(uptime | awk -F'load average:' '{print $2}' | xargs 2>/dev/null)"
+    else
+        HN_LOAD="N/A"
+    fi
     HN_IP="$(curl -s --max-time 2 ifconfig.me 2>/dev/null || echo "Unavailable")"
 }
 

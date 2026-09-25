@@ -5,7 +5,7 @@ source "$ROOT/colors.sh"
 
 HN_BASE_URL="https://raw.githubusercontent.com/HAPPY-NODE/HAPPY-CMD/main"
 LOCAL_EXT="$DIR/Extension"
-URL_EXT="$HN_BASE_URL/test/thame/Extension"
+URL_EXT="$HN_BASE_URL/themes/Extension"
 PTERO_DIR="/var/www/pterodactyl"
 
 st() {

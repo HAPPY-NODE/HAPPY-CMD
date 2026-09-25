@@ -25,6 +25,14 @@ Terminal toolkit with auto-responsive UI — adjusts to any terminal size withou
 
 ## Install
 
+One-liner (no clone needed — scripts auto-download to `~/.happy-cmd`):
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/HAPPY-NODE/HAPPY-CMD/main/menu.sh)
+```
+
+Or clone the full repo (includes theme/panel assets):
+
 ```bash
 git clone https://github.com/HAPPY-NODE/HAPPY-CMD.git
 cd HAPPY-CMD

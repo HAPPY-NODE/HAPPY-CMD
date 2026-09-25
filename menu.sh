@@ -1,5 +1,60 @@
 #!/bin/bash
-DIR="$(cd "$(dirname "$0")" && pwd)"
+# ---------- Bootstrap: curl / pipe mode (no local repo) ----------
+# Downloads only the 47 .sh files (~440 KB) from GitHub tree API.
+HN_RAW="https://raw.githubusercontent.com/HAPPY-NODE/HAPPY-CMD/main"
+HN_TREE="https://api.github.com/repos/HAPPY-NODE/HAPPY-CMD/git/trees/main?recursive=1"
+HN_HOME="${HN_HOME:-$HOME/.happy-cmd}"
+HN_C1='\033[1;96m'; HN_C2='\033[2m'; HN_ERR='\033[1;91m'; HN_OK='\033[1;92m'; HN_OFF='\033[0m'
+
+_src="${BASH_SOURCE[0]:-$0}"
+if [ -f "$_src" ]; then
+    DIR="$(cd "$(dirname "$_src")" 2>/dev/null && pwd)"
+else
+    DIR=""
+fi
+
+if [ -z "$DIR" ] || [ ! -f "$DIR/colors.sh" ]; then
+    hn_install() {
+        local tmp rs p count total
+        tmp="$(mktemp -d)" || { printf "  ${HN_ERR}x${HN_OFF} mktemp failed\n"; return 1; }
+        if ! curl -fsSL --max-time 30 "$HN_TREE" -o "$tmp/tree.json"; then
+            printf "  ${HN_ERR}x${HN_OFF} cannot reach GitHub\n"; rm -rf "$tmp"; return 1
+        fi
+        rs="$(sed -n 's/.*"sha": "\([0-9a-f]\{40\}\)".*/\1/p' "$tmp/tree.json" | head -n1)"
+        if [ -f "$HN_HOME/colors.sh" ] && [ -n "$rs" ] \
+           && [ "$rs" = "$(cat "$HN_HOME/.hn_sha" 2>/dev/null)" ]; then
+            rm -rf "$tmp"; return 2
+        fi
+        sed -n 's/.*"path": "\([^"]*\.sh\)".*/\1/p' "$tmp/tree.json" > "$tmp/paths"
+        total="$(wc -l < "$tmp/paths" | tr -d ' ')"
+        [ "$total" -gt 0 ] || { printf "  ${HN_ERR}x${HN_OFF} empty file list\n"; rm -rf "$tmp"; return 1; }
+        printf "  ${HN_C1}HAPPY-NODE${HN_OFF} ${HN_C2}installing to${HN_OFF} %s\n" "$HN_HOME"
+        mkdir -p "$HN_HOME" || { rm -rf "$tmp"; return 1; }
+        count=0
+        while IFS= read -r p; do
+            mkdir -p "$HN_HOME/$(dirname "$p")" 2>/dev/null
+            if ! curl -fsSL --max-time 30 "$HN_RAW/$p" -o "$HN_HOME/$p.new" 2>/dev/null; then
+                printf "\r  ${HN_ERR}x${HN_OFF} failed: %s                     \n" "$p"
+                rm -rf "$tmp"; return 1
+            fi
+            mv "$HN_HOME/$p.new" "$HN_HOME/$p"
+            count=$((count+1))
+            printf "\r  ${HN_C2}fetch${HN_OFF} scripts ${HN_C1}%s/%s${HN_OFF}" "$count" "$total"
+        done < "$tmp/paths"
+        printf "\r\033[K  ${HN_OK}+${HN_OFF} %s scripts installed\n" "$count"
+        [ -n "$rs" ] && printf "%s" "$rs" > "$HN_HOME/.hn_sha"
+        rm -rf "$tmp"
+        return 0
+    }
+
+    hn_install
+    case $? in
+        2) exec bash "$HN_HOME/menu.sh" ;;
+        0) printf "  ${HN_C2}launching...${HN_OFF}\n"; sleep 0.5; exec bash "$HN_HOME/menu.sh" ;;
+        *) exit 1 ;;
+    esac
+fi
+
 source "$DIR/colors.sh"
 source "$DIR/banner.sh"
 

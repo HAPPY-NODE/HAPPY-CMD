@@ -5,7 +5,7 @@ source "$ROOT/colors.sh"
 
 HN_BASE_URL="https://raw.githubusercontent.com/HAPPY-NODE/HAPPY-CMD/main"
 LOCAL_ARIX="$DIR/arix"
-ARIX_URL="$HN_BASE_URL/test/thame/arix"
+ARIX_URL="$HN_BASE_URL/themes/arix"
 ARIX_FALLBACK="https://raw.githubusercontent.com/sdgamer8263-sketch/pterodactyl_extention1/main/sd"
 PANEL_DIR="/var/www/pterodactyl"
 BACKUP_DIR="/tmp/hn_backups"
