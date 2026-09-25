@@ -1,2 +1,5 @@
 __pycache__/
 *.pyc
+
+# Private notes — never push (see file header)
+CHAT-LOG.md
