@@ -1,9 +1,16 @@
 #!/bin/bash
-DIR="$(cd "$(dirname "$0")" && pwd)"
+DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 ROOT="$(dirname "$DIR")"
-source "$ROOT/colors.sh"
+if [ -f "$ROOT/colors.sh" ]; then
+    HN_ROOT="$ROOT"
+    source "$ROOT/colors.sh"
+else
+    HN_BASE_URL="${HN_BASE_URL:-https://raw.githubusercontent.com/HAPPY-NODE/HAPPY-CMD/main}"
+    source <(curl -fsSL --max-time 30 "$HN_BASE_URL/colors.sh")
+    [ -n "${NC:-}" ] || { echo "x cannot fetch colors.sh from GitHub"; exit 1; }
+fi
 
-HN_BASE_URL="https://raw.githubusercontent.com/HAPPY-NODE/HAPPY-CMD/main"
+HN_BASE_URL="${HN_BASE_URL:-https://raw.githubusercontent.com/HAPPY-NODE/HAPPY-CMD/main}"
 IMG_URL="https://i.postimg.cc/jdbphsXP/Chat-GPT-Image-Sep-23-2026-05-48-16-PM.png"
 
 st() {
@@ -89,13 +96,8 @@ show_menu() {
 
 run_card() {
     local name="$1" script="$2"
-    if [ -f "$script" ]; then
-        section_enter "$name"
-        bash "$script"
-    else
-        st ERR "Missing: $script"
-        sleep 1
-    fi
+    section_enter "$name"
+    hn_run "$script"
 }
 
 while true; do
@@ -103,10 +105,10 @@ while true; do
     show_menu
     read -r opt
     case $opt in
-        1) run_card "Docker VPS Bot" "$DIR/docker.sh" ;;
-        2) run_card "LXC VPS Bot" "$DIR/lxc.sh" ;;
-        3) run_card "SVM V9 Bot" "$DIR/svm.sh" ;;
-        4) run_card "Docker SSHX Bot" "$DIR/sshx.sh" ;;
+        1) run_card "Docker VPS Bot" "bots/docker.sh" ;;
+        2) run_card "LXC VPS Bot" "bots/lxc.sh" ;;
+        3) run_card "SVM V9 Bot" "bots/svm.sh" ;;
+        4) run_card "Docker SSHX Bot" "bots/sshx.sh" ;;
         0) dots_load "Closing bots" 2; exit 0 ;;
         *) echo -e "  ${FR}✗${NC} ${FW}Invalid option${NC}"; sleep 0.7 ;;
     esac

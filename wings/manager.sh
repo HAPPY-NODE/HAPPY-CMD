@@ -1,7 +1,14 @@
 #!/bin/bash
-DIR="$(cd "$(dirname "$0")" && pwd)"
+DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 ROOT="$(dirname "$DIR")"
-source "$ROOT/colors.sh"
+if [ -f "$ROOT/colors.sh" ]; then
+    HN_ROOT="$ROOT"
+    source "$ROOT/colors.sh"
+else
+    HN_BASE_URL="${HN_BASE_URL:-https://raw.githubusercontent.com/HAPPY-NODE/HAPPY-CMD/main}"
+    source <(curl -fsSL --max-time 30 "$HN_BASE_URL/colors.sh")
+    [ -n "${NC:-}" ] || { echo "x cannot fetch colors.sh from GitHub"; exit 1; }
+fi
 
 SERVICE="wings"
 
@@ -114,7 +121,7 @@ auto_setup() {
         read -r s_choice
         case $s_choice in
             1)
-                bash "$DIR/config.sh"
+                hn_run "wings/config.sh"
                 pause
                 ;;
             2)
@@ -127,7 +134,7 @@ auto_setup() {
                     st WAIT "Executing deploy command..."
                     eval "$CMD"
                     systemctl restart wings 2>/dev/null
-                    bash "$DIR/config.sh"
+                    hn_run "wings/config.sh"
                 fi
                 pause
                 ;;
@@ -200,7 +207,7 @@ while true; do
                 echo -ne "  ${C}➜${NC} ${W}Choice${NC} ${DG}(0-1):${NC} "
                 read -r sc
                 case $sc in
-                    1) bash "$DIR/config.sh"; pause ;;
+                    1) hn_run "wings/config.sh"; pause ;;
                     0) break ;;
                     *) echo -e "  ${R}✗ Invalid${NC}"; sleep 0.6 ;;
                 esac

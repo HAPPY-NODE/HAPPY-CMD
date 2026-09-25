@@ -1,9 +1,16 @@
 #!/bin/bash
-DIR="$(cd "$(dirname "$0")" && pwd)"
+DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 ROOT="$(dirname "$DIR")"
-source "$ROOT/colors.sh"
+if [ -f "$ROOT/colors.sh" ]; then
+    HN_ROOT="$ROOT"
+    source "$ROOT/colors.sh"
+else
+    HN_BASE_URL="${HN_BASE_URL:-https://raw.githubusercontent.com/HAPPY-NODE/HAPPY-CMD/main}"
+    source <(curl -fsSL --max-time 30 "$HN_BASE_URL/colors.sh")
+    [ -n "${NC:-}" ] || { echo "x cannot fetch colors.sh from GitHub"; exit 1; }
+fi
 
-HN_BASE_URL="https://raw.githubusercontent.com/HAPPY-NODE/HAPPY-CMD/main"
+HN_BASE_URL="${HN_BASE_URL:-https://raw.githubusercontent.com/HAPPY-NODE/HAPPY-CMD/main}"
 PANEL_DIR="/var/www/pterodactyl"
 
 st() {
@@ -122,13 +129,8 @@ show_menu() {
 
 run_card() {
     local name="$1" script="$2"
-    if [ -f "$script" ]; then
-        section_enter "$name"
-        bash "$script"
-    else
-        st ERR "Missing: $script"
-        sleep 1
-    fi
+    section_enter "$name"
+    hn_run "$script"
 }
 
 # ---------- Main ----------
@@ -142,11 +144,11 @@ while true; do
     show_menu
     read -r opt
     case $opt in
-        1) run_card "Blueprint" "$DIR/blueprint.sh" ;;
-        2) run_card "Theme Library" "$DIR/manager.sh" ;;
-        3) run_card "Extensions" "$DIR/extensions.sh" ;;
-        4) run_card "ARIX Theme" "$DIR/arix.sh" ;;
-        5) run_card "Hyper V1" "$DIR/hyper.sh" ;;
+        1) run_card "Blueprint" "themes/blueprint.sh" ;;
+        2) run_card "Theme Library" "themes/manager.sh" ;;
+        3) run_card "Extensions" "themes/extensions.sh" ;;
+        4) run_card "ARIX Theme" "themes/arix.sh" ;;
+        5) run_card "Hyper V1" "themes/hyper.sh" ;;
         6)
             section_enter "Panel Cache"
             panel_clear

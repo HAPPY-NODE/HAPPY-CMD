@@ -25,7 +25,8 @@ Terminal toolkit with auto-responsive UI — adjusts to any terminal size withou
 
 ## Install
 
-One-liner (no clone needed — scripts auto-download to `~/.happy-cmd`):
+One-liner — nothing is downloaded or saved on the VPS, every script streams
+straight from GitHub (only actual panel/theme installs are written to disk):
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/HAPPY-NODE/HAPPY-CMD/main/menu.sh)

@@ -1,6 +1,29 @@
 #!/bin/bash
 # HAPPY NODE — professional color palette ($'' form for echo -e + read -p)
 # Primary: steel/cyan · Accent: soft violet · Success: mint · Dim: slate
+
+# ---------- GitHub base (everything streams from here, nothing saved) ----------
+HN_BASE_URL="${HN_BASE_URL:-https://raw.githubusercontent.com/HAPPY-NODE/HAPPY-CMD/main}"
+
+# Run a repo script: local clone copy if present, else stream from GitHub.
+# Usage: hn_run "panel/panel.sh"   (repo-root relative path)
+# Stream -> temp file (RAM) -> run -> auto-delete. VPS par kuch nahi rehta.
+hn_run() (
+    local rel="$1" tmp
+    if [ -n "${HN_ROOT:-}" ] && [ -f "$HN_ROOT/$rel" ]; then
+        bash "$HN_ROOT/$rel"
+        exit $?
+    fi
+    tmp="$(mktemp /tmp/hn_run.XXXXXX)" || { echo "  x mktemp failed"; exit 1; }
+    trap 'rm -f "$tmp"' EXIT
+    if ! curl -fsSL --max-time 60 "$HN_BASE_URL/$rel" -o "$tmp" || [ ! -s "$tmp" ]; then
+        printf "  \033[1;91mx\033[0m cannot fetch: %s\n" "$rel"
+        exit 1
+    fi
+    bash "$tmp"
+    exit $?
+)
+
 R=$'\033[0;31m'       # red
 G=$'\033[0;32m'       # green
 Y=$'\033[0;33m'       # amber

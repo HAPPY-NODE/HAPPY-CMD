@@ -1,9 +1,16 @@
 #!/bin/bash
-DIR="$(cd "$(dirname "$0")" && pwd)"
+DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 ROOT="$(dirname "$DIR")"
-source "$ROOT/colors.sh"
+if [ -f "$ROOT/colors.sh" ]; then
+    HN_ROOT="$ROOT"
+    source "$ROOT/colors.sh"
+else
+    HN_BASE_URL="${HN_BASE_URL:-https://raw.githubusercontent.com/HAPPY-NODE/HAPPY-CMD/main}"
+    source <(curl -fsSL --max-time 30 "$HN_BASE_URL/colors.sh")
+    [ -n "${NC:-}" ] || { echo "x cannot fetch colors.sh from GitHub"; exit 1; }
+fi
 
-HN_BASE_URL="https://raw.githubusercontent.com/HAPPY-NODE/HAPPY-CMD/main"
+HN_BASE_URL="${HN_BASE_URL:-https://raw.githubusercontent.com/HAPPY-NODE/HAPPY-CMD/main}"
 IMG_URL="https://i.postimg.cc/jdbphsXP/Chat-GPT-Image-Sep-23-2026-05-48-16-PM.png"
 BOT_HOME="/root/happy-sshx-bot"
 UNIT="happy-sshx-bot.service"

@@ -1,6 +1,14 @@
 #!/bin/bash
-DIR="$(cd "$(dirname "$0")" && pwd)"
-source "$DIR/../colors.sh"
+DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
+ROOT="$(dirname "$DIR")"
+if [ -f "$ROOT/colors.sh" ]; then
+    HN_ROOT="$ROOT"
+    source "$ROOT/colors.sh"
+else
+    HN_BASE_URL="${HN_BASE_URL:-https://raw.githubusercontent.com/HAPPY-NODE/HAPPY-CMD/main}"
+    source <(curl -fsSL --max-time 30 "$HN_BASE_URL/colors.sh")
+    [ -n "${NC:-}" ] || { echo "x cannot fetch colors.sh from GitHub"; exit 1; }
+fi
 
 # ---------- Animations ----------
 dots_load() {
@@ -75,7 +83,7 @@ while true; do
         1)
             if [ -e /dev/kvm ] && [ -r /dev/kvm ]; then
                 section_enter "KVM Setup"
-                bash "$DIR/vps-kvm.sh"
+                hn_run "vps-setup/vps-kvm.sh"
             else
                 clear
                 echo -e "  ${Y}⚠ KVM not available on this system${NC}"
@@ -83,11 +91,11 @@ while true; do
                 read -rp "  Press Enter to continue..." _
             fi
             ;;
-        2) section_enter "No KVM Setup"; bash "$DIR/vps-nokvm.sh" ;;
-        3) section_enter "proot Setup"; bash "$DIR/vps-proot.sh" ;;
-        4) section_enter "LXC Setup"; bash "$DIR/vps-lxc.sh" ;;
-        5) section_enter "Docker Setup"; bash "$DIR/vps-docker.sh" ;;
-        6) section_enter "nspawn Setup"; bash "$DIR/vps-nspawn.sh" ;;
+        2) section_enter "No KVM Setup"; hn_run "vps-setup/vps-nokvm.sh" ;;
+        3) section_enter "proot Setup"; hn_run "vps-setup/vps-proot.sh" ;;
+        4) section_enter "LXC Setup"; hn_run "vps-setup/vps-lxc.sh" ;;
+        5) section_enter "Docker Setup"; hn_run "vps-setup/vps-docker.sh" ;;
+        6) section_enter "nspawn Setup"; hn_run "vps-setup/vps-nspawn.sh" ;;
         0) dots_load "Returning" 2; exit 0 ;;
         *) echo -e "  ${R}✗ Invalid option${NC}"; sleep 0.8 ;;
     esac

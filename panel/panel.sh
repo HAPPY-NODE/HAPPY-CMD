@@ -1,7 +1,14 @@
 #!/bin/bash
-DIR="$(cd "$(dirname "$0")" && pwd)"
+DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 ROOT="$(dirname "$DIR")"
-source "$ROOT/colors.sh"
+if [ -f "$ROOT/colors.sh" ]; then
+    HN_ROOT="$ROOT"
+    source "$ROOT/colors.sh"
+else
+    HN_BASE_URL="${HN_BASE_URL:-https://raw.githubusercontent.com/HAPPY-NODE/HAPPY-CMD/main}"
+    source <(curl -fsSL --max-time 30 "$HN_BASE_URL/colors.sh")
+    [ -n "${NC:-}" ] || { echo "x cannot fetch colors.sh from GitHub"; exit 1; }
+fi
 
 # ---------- Animations ----------
 dots_load() {
@@ -146,13 +153,8 @@ show_header() {
 run_panel() {
     local name="$1"
     local script="$2"
-    if [ -f "$script" ]; then
-        section_enter "$name"
-        bash "$script"
-    else
-        echo -e "  ${R}✗ Script not found: $script${NC}"
-        sleep 1
-    fi
+    section_enter "$name"
+    hn_run "$script"
 }
 
 # ---------- Main ----------
@@ -161,16 +163,16 @@ while true; do
     show_header
     read -r opt
     case "$opt" in
-        1) run_panel "HVM Panel" "$DIR/hvm.sh" ;;
-        2) run_panel "HKVM Panel" "$DIR/hkvm.sh" ;;
-        3) run_panel "AKVM Panel" "$DIR/akvm.sh" ;;
-        4) run_panel "Pterodactyl" "$DIR/pterodactyl.sh" ;;
-        5) run_panel "Jexactyl" "$DIR/jexactyl.sh" ;;
-        6) run_panel "Reviactyl" "$DIR/reviactyl.sh" ;;
-        7) run_panel "Paymenter" "$DIR/paymenter.sh" ;;
-        8) run_panel "Convoy" "$DIR/convoy.sh" ;;
-        9) run_panel "MythicalDash" "$DIR/mythical.sh" ;;
-        10) run_panel "PufferPanel" "$DIR/pufferpanel.sh" ;;
+        1) run_panel "HVM Panel" "panel/hvm.sh" ;;
+        2) run_panel "HKVM Panel" "panel/hkvm.sh" ;;
+        3) run_panel "AKVM Panel" "panel/akvm.sh" ;;
+        4) run_panel "Pterodactyl" "panel/pterodactyl.sh" ;;
+        5) run_panel "Jexactyl" "panel/jexactyl.sh" ;;
+        6) run_panel "Reviactyl" "panel/reviactyl.sh" ;;
+        7) run_panel "Paymenter" "panel/paymenter.sh" ;;
+        8) run_panel "Convoy" "panel/convoy.sh" ;;
+        9) run_panel "MythicalDash" "panel/mythical.sh" ;;
+        10) run_panel "PufferPanel" "panel/pufferpanel.sh" ;;
         0) dots_load "Returning" 2; exit 0 ;;
         *) echo -e "  ${R}✗ Invalid option${NC}"; sleep 0.8 ;;
     esac

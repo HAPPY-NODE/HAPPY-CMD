@@ -1,9 +1,16 @@
 #!/bin/bash
-DIR="$(cd "$(dirname "$0")" && pwd)"
+DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 ROOT="$(dirname "$DIR")"
-source "$ROOT/colors.sh"
+if [ -f "$ROOT/colors.sh" ]; then
+    HN_ROOT="$ROOT"
+    source "$ROOT/colors.sh"
+else
+    HN_BASE_URL="${HN_BASE_URL:-https://raw.githubusercontent.com/HAPPY-NODE/HAPPY-CMD/main}"
+    source <(curl -fsSL --max-time 30 "$HN_BASE_URL/colors.sh")
+    [ -n "${NC:-}" ] || { echo "x cannot fetch colors.sh from GitHub"; exit 1; }
+fi
 
-HN_BASE_URL="https://raw.githubusercontent.com/HAPPY-NODE/HAPPY-CMD/main"
+HN_BASE_URL="${HN_BASE_URL:-https://raw.githubusercontent.com/HAPPY-NODE/HAPPY-CMD/main}"
 
 st() {
     case $1 in
@@ -128,11 +135,11 @@ while true; do
         1) ssl_setup ;;
         2)
             st WAIT "Launching Wings installer..."
-            bash "$DIR/install.sh"
+            hn_run "wings/install.sh"
             pause
             ;;
-        3) bash "$DIR/manager.sh" ;;
-        4) bash "$DIR/db.sh"; pause ;;
+        3) hn_run "wings/manager.sh" ;;
+        4) hn_run "wings/db.sh"; pause ;;
         5) uninstall_wings ;;
         0) dots_load "Returning" 2; exit 0 ;;
         *) echo -e "  ${R}✗ Invalid option${NC}"; sleep 0.8 ;;

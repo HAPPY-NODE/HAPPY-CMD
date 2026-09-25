@@ -1,7 +1,14 @@
 #!/bin/bash
-DIR="$(cd "$(dirname "$0")" && pwd)"
+DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 ROOT="$(dirname "$DIR")"
-source "$ROOT/colors.sh"
+if [ -f "$ROOT/colors.sh" ]; then
+    HN_ROOT="$ROOT"
+    source "$ROOT/colors.sh"
+else
+    HN_BASE_URL="${HN_BASE_URL:-https://raw.githubusercontent.com/HAPPY-NODE/HAPPY-CMD/main}"
+    source <(curl -fsSL --max-time 30 "$HN_BASE_URL/colors.sh")
+    [ -n "${NC:-}" ] || { echo "x cannot fetch colors.sh from GitHub"; exit 1; }
+fi
 
 st() {
     case $1 in
@@ -84,13 +91,8 @@ show_header() {
 run_tool() {
     local name="$1"
     local script="$2"
-    if [ -f "$script" ]; then
-        section_enter "$name"
-        bash "$script"
-    else
-        st ERR "Script not found: $script"
-        sleep 1
-    fi
+    section_enter "$name"
+    hn_run "$script"
 }
 
 echo -e "  ${C}→${NC} Detecting system info..."
@@ -115,21 +117,16 @@ while true; do
     echo -ne "  ${FC}➜${NC} ${FW}Enter Option${NC} ${SL}(0-8):${NC} "
     read -r opt
     case $opt in
-        1) run_tool "Root Access" "$DIR/root.sh" ;;
-        2) run_tool "Tailscale" "$DIR/tailscale.sh" ;;
-        3) run_tool "ZeroTier" "$DIR/zerotier.sh" ;;
-        4) run_tool "Cloudflare" "$DIR/cloudflare.sh" ;;
-        5) run_tool "System Info" "$DIR/info.sh" ;;
-        6) run_tool "Port Forward" "$DIR/localtonet.sh" ;;
-        7) run_tool "Web Terminal" "$DIR/terminal.sh" ;;
+        1) run_tool "Root Access" "toolbox/root.sh" ;;
+        2) run_tool "Tailscale" "toolbox/tailscale.sh" ;;
+        3) run_tool "ZeroTier" "toolbox/zerotier.sh" ;;
+        4) run_tool "Cloudflare" "toolbox/cloudflare.sh" ;;
+        5) run_tool "System Info" "toolbox/info.sh" ;;
+        6) run_tool "Port Forward" "toolbox/localtonet.sh" ;;
+        7) run_tool "Web Terminal" "toolbox/terminal.sh" ;;
         8)
-            if [ -f "$ROOT/wings/wings.sh" ]; then
-                section_enter "SSL Panel"
-                bash "$ROOT/wings/wings.sh"
-            else
-                st ERR "SSL module not found"
-                sleep 1
-            fi
+            section_enter "SSL Panel"
+            hn_run "wings/wings.sh"
             ;;
         0) dots_load "Returning" 2; exit 0 ;;
         *) echo -e "  ${R}✗ Invalid option${NC}"; sleep 0.8 ;;
