@@ -86,11 +86,16 @@ panel_status() {
     fi
 }
 
+# dir bana hai but service/unit nahi = incomplete install (pehle ye bhi yellow dikhata tha = jhootha green)
 hkvm_status() {
-    if pgrep -f "/root/hkvm/hkvm/app.js" >/dev/null 2>&1; then
+    if pgrep -f "hkvm/hkvm/app.js|node app.js" >/dev/null 2>&1; then
         echo -e "${G}● RUNNING${NC}"
+    elif [ -f "/etc/systemd/system/hkvm.service" ] && systemctl is-failed --quiet hkvm.service 2>/dev/null; then
+        echo -e "${R}● FAILED — run Install again${NC}"
+    elif [ -f "/etc/systemd/system/hkvm.service" ]; then
+        echo -e "${Y}● INSTALLED (stopped)${NC}"
     elif [ -d "/root/hkvm/hkvm" ]; then
-        echo -e "${Y}● INSTALLED${NC}"
+        echo -e "${R}● PARTIAL — run Install again${NC}"
     else
         echo -e "${R}● NOT INSTALLED${NC}"
     fi
@@ -99,18 +104,26 @@ hkvm_status() {
 hvm_status() {
     if pgrep -f "/root/hvm/hvm/hvm.py" >/dev/null 2>&1; then
         echo -e "${G}● RUNNING${NC}"
+    elif [ -f "/etc/systemd/system/hvm.service" ] && systemctl is-failed --quiet hvm.service 2>/dev/null; then
+        echo -e "${R}● FAILED — run Install again${NC}"
+    elif [ -f "/etc/systemd/system/hvm.service" ]; then
+        echo -e "${Y}● INSTALLED (stopped)${NC}"
     elif [ -d "/root/hvm/hvm" ]; then
-        echo -e "${Y}● INSTALLED${NC}"
+        echo -e "${R}● PARTIAL — run Install again${NC}"
     else
         echo -e "${R}● NOT INSTALLED${NC}"
     fi
 }
 
 akvm_status() {
-    if pgrep -f "/opt/akvm/akvm.py" >/dev/null 2>&1; then
+    if pgrep -f "akvm.py" >/dev/null 2>&1; then
         echo -e "${G}● RUNNING${NC}"
+    elif [ -f "/etc/systemd/system/akvm.service" ] && systemctl is-failed --quiet akvm.service 2>/dev/null; then
+        echo -e "${R}● FAILED — run Install again${NC}"
+    elif [ -f "/etc/systemd/system/akvm.service" ]; then
+        echo -e "${Y}● INSTALLED (stopped)${NC}"
     elif [ -d "/opt/akvm" ]; then
-        echo -e "${Y}● INSTALLED${NC}"
+        echo -e "${R}● PARTIAL — run Install again${NC}"
     else
         echo -e "${R}● NOT INSTALLED${NC}"
     fi

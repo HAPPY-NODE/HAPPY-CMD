@@ -124,6 +124,12 @@ run_live() {
     done
     wait "$pid"; rc=$?
     printf "\r\033[K"
+    # failure par actual error lines dikhao (warna user ko pata hi nahi chalta kya fail hua)
+    if [ "$rc" -ne 0 ] && [ -s "$log" ]; then
+        while IFS= read -r l; do
+            printf "  \033[1;91m│\033[0m %s\n" "$l"
+        done < <(tail -n 6 "$log" 2>/dev/null)
+    fi
     rm -f "$log"
     return $rc
 }

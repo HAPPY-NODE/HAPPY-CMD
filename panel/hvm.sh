@@ -22,6 +22,15 @@ st() {
 }
 pause() { echo ""; read -rp "  Press Enter to continue... " _; }
 
+# pip with PEP-668 flag fallback (Ubuntu 23.04+ aur 22.04 dono par chale)
+# run_live ke andar background me chalta hai — output run_live ka log le leta hai
+hvm_pip() {
+    local l; l="$(mktemp /tmp/hvm_pip.XXXXXX 2>/dev/null)" || l=/tmp/hvm_pip.$$
+    if python3 -m pip "$@" --break-system-packages >"$l" 2>&1; then rm -f "$l"; return 0; fi
+    if python3 -m pip "$@" >"$l" 2>&1; then rm -f "$l"; return 0; fi
+    tail -5 "$l"; rm -f "$l"; return 1
+}
+
 show_creds_box() {
     local name="$1" url="$2"
     echo ""
@@ -57,7 +66,14 @@ show_header() {
     clear
     local status="${R}● NOT INSTALLED${NC}"
     systemctl is-active --quiet hvm.service 2>/dev/null && status="${G}● RUNNING${NC}"
-    [ -d "/root/hvm/hvm" ] && [ ! "$(systemctl is-active hvm.service 2>/dev/null)" = "active" ] && status="${Y}● INSTALLED${NC}"
+    if [ -f /etc/systemd/system/hvm.service ] && [ ! "$(systemctl is-active hvm.service 2>/dev/null)" = "active" ]; then
+        if systemctl is-failed --quiet hvm.service 2>/dev/null; then
+            status="${R}● FAILED — see menu [5]/[6]${NC}"
+        else
+            status="${Y}● INSTALLED (stopped)${NC}"
+        fi
+    fi
+    [ -d "/root/hvm/hvm" ] && [ ! -f /etc/systemd/system/hvm.service ] && status="${R}● PARTIAL — run Install again${NC}"
     echo -e "  ${CB}╭──────────────────────────────────────────────╮${NC}"
     echo -e "  ${CB}│${W}     H V M   P A N E L                        ${CB}│${NC}"
     echo -e "  ${CB}│${DG}    LXC VPS Manager  Port 5000                ${CB}│${NC}"
@@ -167,45 +183,113 @@ install_hvm() {
     mkdir -p /root/hvm
     if [ -f "$DIR/hvm.zip" ]; then
         st WAIT "Extracting HVM Panel..."
-        run_live "unzip-hvm" unzip -o "$DIR/hvm.zip" -d /root/hvm || { st ERR "Unzip failed"; pause; return; }
+        run_live "unzip-hvm" unzip -o "$DIR/hvm.zip" -d /root/hvm || true
     else
         run_dl "HVM Panel zip" "$HN_BASE_URL/panel/hvm.zip" /tmp/hvm.zip || { st ERR "Download failed"; pause; return; }
         st WAIT "Extracting HVM Panel..."
-        run_live "unzip-hvm" unzip -o /tmp/hvm.zip -d /root/hvm || { st ERR "Unzip failed"; pause; return; }
+        run_live "unzip-hvm" unzip -o /tmp/hvm.zip -d /root/hvm || true
+    fi
+    # asli proof = files, unzip rc nahi (purane zip warning par rc=1 deti thi)
+    if [ ! -f /root/hvm/hvm/hvm.py ]; then
+        st ERR "Extract failed — hvm.py not found"
+        st INFO "Fix: rm -rf /root/hvm  →  re-run [1] Install"
+        pause; return 1
     fi
     st OK "Panel files ready (/root/hvm)"
 
-    st WAIT "Installing Python packages..."
-    if ! run_live "pip-install" pip3 install --break-system-packages flask flask_login paramiko \
-        flask-cors flask-socketio eventlet requests bcrypt pillow psutil \
-        cryptography python-dotenv; then
-        if ! run_live "pip-install" pip3 install flask flask_login paramiko \
-            flask-cors flask-socketio eventlet requests bcrypt pillow psutil \
-            cryptography python-dotenv; then
-            st ERR "pip install failed"
-            st INFO "Run: pip3 install flask flask_login flask-cors flask-socketio eventlet"
-            pause; return
+    echo -e "  ${C}◆ PYTHON PACKAGES${NC}"
+    if ! python3 -m pip --version >/dev/null 2>&1; then
+        st WAIT "pip missing — installing python3-pip..."
+        run_live "apt-pip" env DEBIAN_FRONTEND=noninteractive apt-get install -y python3-pip || true
+        if ! python3 -m pip --version >/dev/null 2>&1; then
+            st ERR "pip still unavailable — panel deps cannot install"
+            st INFO "Fix first: apt update && apt install python3-pip"
+            pause; return 1
         fi
     fi
+
+    st WAIT "Stage 1/3: core (flask, flask_login, socketio)..."
+    if run_live "pip-core" hvm_pip install flask Flask-Login flask-cors flask-socketio Werkzeug requests python-dotenv; then
+        st OK "core packages installed"
+    else
+        st ERR "Core pip install failed — see error above"
+        st INFO "Retry: python3 -m pip install flask Flask-Login flask-cors flask-socketio"
+        st INFO "then re-run [1] Install from this menu"
+        pause; return 1
+    fi
+
+    st WAIT "Stage 2/3: extras (paramiko, eventlet, bcrypt, pillow, psutil)..."
+    run_live "pip-extra" hvm_pip install eventlet bcrypt pillow psutil cryptography paramiko || \
+        st WARN "some extras failed — verifying next"
 
     if [ -f /root/hvm/hvm/requirements.txt ]; then
-        st WAIT "Installing requirements.txt..."
-        if ! run_live "pip-req" pip3 install --break-system-packages -r /root/hvm/hvm/requirements.txt; then
-            run_live "pip-req" pip3 install -r /root/hvm/hvm/requirements.txt || \
-            st WARN "requirements.txt partial fail (base pkgs OK)"
-        fi
+        st WAIT "Stage 3/3: pinned requirements.txt..."
+        run_live "pip-req" hvm_pip install -r /root/hvm/hvm/requirements.txt || \
+            st WARN "pinned versions partial (stage 1-2 already OK)"
     fi
-    st OK "Python packages ready"
 
-    st WAIT "Initializing LXD..."
+    st WAIT "Verifying imports (real check)..."
+    if python3 -c "import flask, flask_login, flask_cors, flask_socketio, werkzeug, requests, dotenv" 2>/tmp/hvm_imp.log; then
+        st OK "All critical packages import OK"
+        rm -f /tmp/hvm_imp.log
+    else
+        st ERR "Import check FAILED — panel would crash:"
+        while IFS= read -r l; do echo -e "     ${R}$l${NC}"; done < <(grep -E 'ModuleNotFoundError|ImportError' /tmp/hvm_imp.log 2>/dev/null | tail -2)
+        st INFO "Fix: python3 -m pip install --break-system-packages -r /root/hvm/hvm/requirements.txt"
+        st INFO "then re-run [1] Install from this menu"
+        rm -f /tmp/hvm_imp.log
+        pause; return 1
+    fi
+
+    # optional features — ye na ho to panel chalta hai but khaas feature gayab
+    local opt_miss=()
+    python3 -c "import paramiko" 2>/dev/null || opt_miss+=("paramiko=SSH console")
+    python3 -c "import PIL" 2>/dev/null || opt_miss+=("pillow=image optimize")
+    python3 -c "import hypercorn" 2>/dev/null || opt_miss+=("hypercorn=production server")
+    python3 -c "import eventlet" 2>/dev/null || opt_miss+=("eventlet=async")
+    if [ ${#opt_miss[@]} -gt 0 ]; then
+        st WARN "Optional features missing: ${opt_miss[*]}"
+        st INFO "Fix: python3 -m pip install --break-system-packages paramiko pillow hypercorn eventlet"
+    fi
+
+    st WAIT "Initializing LXD (daemon + storage pool + network)..."
     if command -v lxd >/dev/null 2>&1; then
-        if lxd init --auto >/dev/null 2>&1; then
-            st OK "LXD ready"
+        # fresh install par daemon abhi boot hota hota hai — pehle uska wait karo
+        local i
+        for i in $(seq 1 15); do
+            lxd ready >/dev/null 2>&1 && break
+            sleep 2
+        done
+        if ! lxd ready >/dev/null 2>&1; then
+            systemctl enable --now lxd.socket >/dev/null 2>&1 || snap start lxd >/dev/null 2>&1 || true
+            sleep 5
+        fi
+        # storage pool/br0 missing = VPS create 100% fail — init --auto se banao, verify karo, retry
+        if ! lxc storage show default >/dev/null 2>&1 || ! lxc network show lxdbr0 >/dev/null 2>&1; then
+            run_live "lxd-init" lxd init --auto || true
+            sleep 3
+            if ! lxc storage show default >/dev/null 2>&1; then
+                sleep 3
+                run_live "lxd-init-retry" lxd init --auto || true
+                sleep 2
+            fi
+        fi
+        if lxc storage show default >/dev/null 2>&1; then
+            st OK "LXD storage pool 'default' ready"
         else
-            st WARN "LXD init skipped (already initialized or failed)"
+            st WARN "LXD storage pool STILL missing — VPS create will fail"
+            st INFO "Fix: lxd init --auto   then verify: lxc storage show default"
+        fi
+        lxc network show lxdbr0 >/dev/null 2>&1 || st WARN "lxdbr0 network missing — run: lxd init --auto"
+        # images remote (panel ka fallback ubuntu/20.04 isi se aata hai)
+        if ! lxc remote show images >/dev/null 2>&1; then
+            st WAIT "Adding 'images' remote..."
+            lxc remote add images https://images.linuxcontainers.org --protocol=simplestreams --public >/dev/null 2>&1 || \
+                st WARN "images remote add failed — fallback images may not work"
         fi
     else
-        st WARN "lxd binary not found"
+        st WARN "lxd binary not found — VPS create will not work"
+        st INFO "Fix: snap install lxd"
     fi
 
     st WAIT "Writing systemd service..."
@@ -255,6 +339,12 @@ EOF
 
     st WAIT "Starting service..."
     if [ "$has_sys" = 1 ]; then
+        # manual python3 hvm.py chalu ho to port 5000 busy — service ko start karne se pehle hatao
+        if pgrep -f "/root/hvm/hvm/hvm.py" >/dev/null 2>&1; then
+            st INFO "Stopping manual hvm.py process (port 5000)..."
+            pkill -f "/root/hvm/hvm/hvm.py" 2>/dev/null || true
+            sleep 1
+        fi
         systemctl daemon-reload
         systemctl enable hvm.service >/dev/null 2>&1
         systemctl restart hvm.service
@@ -266,17 +356,25 @@ EOF
             echo -e "  ${W}Service:${NC} hvm.service (active)"
             echo -e "  ${W}Path:${NC}    /root/hvm/hvm"
             show_creds_box "HVM" "http://$DOMAIN:5000"
+            echo -e "  ${SL}Manual test: cd /root/hvm/hvm && python3 hvm.py${NC}"
+            if lxc storage show default >/dev/null 2>&1; then
+                echo -e "  ${W}LXD:${NC}     storage pool ready (VPS create OK)"
+            else
+                echo -e "  ${FR}LXD pool missing — VPS create will fail (run: lxd init --auto)${NC}"
+            fi
         else
-            st ERR "Service failed. Check: journalctl -u hvm.service"
-            st INFO "Fallback: nohup python3 /root/hvm/hvm/hvm.py &"
+            st ERR "Service failed — last journal lines:"
+            journalctl -u hvm.service -n 12 --no-pager 2>/dev/null | tail -8 | sed 's/^/  /'
+            st INFO "Full log: journalctl -u hvm.service -e"
+            st INFO "Manual: cd /root/hvm/hvm && python3 hvm.py"
         fi
     else
-        st WARN "No systemd — using nohup fallback..."
+        st WARN "No systemd — starting in background mode..."
         pkill -f "/root/hvm/hvm/hvm.py" 2>/dev/null || true
         cd /root/hvm/hvm && PORT=5000 HOST=0.0.0.0 nohup python3 /root/hvm/hvm/hvm.py >/var/log/hvm.log 2>&1 &
         sleep 2
         if pgrep -f "/root/hvm/hvm/hvm.py" >/dev/null 2>&1; then
-            st OK "HVM Panel running (nohup, no systemd)"
+            st OK "HVM Panel running (background mode, no systemd)"
             echo -e "  ${W}URL:${NC}  http://$DOMAIN:5000"
             echo -e "  ${W}Log:${NC}   /var/log/hvm.log"
             st INFO "Note: auto-start on reboot not available without systemd"
@@ -293,12 +391,12 @@ start_service() {
     if command -v systemctl >/dev/null 2>&1 && systemctl start hvm.service 2>/dev/null; then
         st OK "Started (systemd)"
     elif pgrep -f "/root/hvm/hvm/hvm.py" >/dev/null 2>&1; then
-        st INFO "Already running (nohup)"
+        st INFO "Already running (background mode)"
     else
         if [ -f /root/hvm/hvm/hvm.py ]; then
             cd /root/hvm/hvm && PORT=5000 HOST=0.0.0.0 nohup python3 /root/hvm/hvm/hvm.py >/var/log/hvm.log 2>&1 &
             sleep 2
-            pgrep -f "/root/hvm/hvm/hvm.py" >/dev/null 2>&1 && st OK "Started (nohup)" || st ERR "Failed — see /var/log/hvm.log"
+            pgrep -f "/root/hvm/hvm/hvm.py" >/dev/null 2>&1 && st OK "Started (background mode)" || st ERR "Failed — see /var/log/hvm.log"
         else
             st ERR "Not installed"
         fi
@@ -325,7 +423,7 @@ restart_service() {
     elif [ -f /root/hvm/hvm/hvm.py ]; then
         cd /root/hvm/hvm && PORT=5000 HOST=0.0.0.0 nohup python3 /root/hvm/hvm/hvm.py >/var/log/hvm.log 2>&1 &
         sleep 2
-        pgrep -f "/root/hvm/hvm/hvm.py" >/dev/null 2>&1 && st OK "Restarted (nohup)" || st ERR "Failed — see /var/log/hvm.log"
+        pgrep -f "/root/hvm/hvm/hvm.py" >/dev/null 2>&1 && st OK "Restarted (background mode)" || st ERR "Failed — see /var/log/hvm.log"
     else
         st ERR "Not installed"
     fi
@@ -338,7 +436,7 @@ service_status() {
         systemctl status hvm.service --no-pager -l 2>/dev/null | head -15
     else
         if pgrep -f "/root/hvm/hvm/hvm.py" >/dev/null 2>&1; then
-            st OK "Running (nohup) PID: $(pgrep -f '/root/hvm/hvm/hvm.py' | head -1)"
+            st OK "Running (background) PID: $(pgrep -f '/root/hvm/hvm/hvm.py' | head -1)"
         else
             st ERR "Not running"
         fi

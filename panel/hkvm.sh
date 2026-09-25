@@ -69,7 +69,7 @@ show_header() {
     local status="${R}● NOT INSTALLED${NC}"
     if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet hkvm.service 2>/dev/null; then
         status="${G}● RUNNING${NC}"
-    elif pgrep -f "/root/hkvm/hkvm/app.js" >/dev/null 2>&1; then
+    elif pgrep -f "hkvm/hkvm/app.js|node app.js" >/dev/null 2>&1; then
         status="${G}● RUNNING${NC}"
     elif [ -d "/root/hkvm/hkvm" ]; then
         status="${Y}● INSTALLED${NC}"
@@ -138,7 +138,7 @@ vps_check() {
 
 install_hkvm() {
     show_header
-    if [ -d "/root/hkvm/hkvm" ] && pgrep -f "/root/hkvm/hkvm/app.js" >/dev/null 2>&1; then
+    if [ -d "/root/hkvm/hkvm" ] && pgrep -f "hkvm/hkvm/app.js|node app.js" >/dev/null 2>&1; then
         st OK "HKVM Panel already installed & running."
         pause; return
     fi
@@ -180,16 +180,30 @@ install_hkvm() {
             local uz=1
         fi
     fi
-    [ "$uz" = 0 ] || { st ERR "Unzip failed"; pause; return; }
+    # asli proof = app.js file, unzip rc nahi (purane zip warning par rc=1 deti thi)
+    if [ ! -f /root/hkvm/hkvm/app.js ]; then
+        st ERR "Extract failed — app.js not found"
+        st INFO "Fix: rm -rf /root/hkvm  →  re-run [1] Install"
+        pause; return 1
+    fi
     st OK "Panel files ready (/root/hkvm/hkvm)"
 
-    if [ -d /root/hkvm/hkvm/node_modules ]; then
-        st OK "node_modules bundled (offline OK)"
+    if [ -d /root/hkvm/hkvm/node_modules ] && [ -n "$(ls -A /root/hkvm/hkvm/node_modules 2>/dev/null)" ]; then
+        st OK "node_modules present"
     else
         st WAIT "npm install..."
         if ! (cd /root/hkvm/hkvm && run_live "npm" npm install --omit=dev --no-audit --no-fund); then
-            st WARN "npm install partial fail"
+            st ERR "npm install failed — see error above"
+            st INFO "Retry: cd /root/hkvm/hkvm && npm install --omit=dev"
+            st INFO "then re-run [1] Install from this menu"
+            pause; return 1
         fi
+        if [ -z "$(ls -A /root/hkvm/hkvm/node_modules 2>/dev/null)" ]; then
+            st ERR "node_modules still empty — panel would crash"
+            st INFO "Retry: cd /root/hkvm/hkvm && npm install --omit=dev"
+            pause; return 1
+        fi
+        st OK "npm deps installed"
     fi
 
     st WAIT "Writing systemd service..."
@@ -260,12 +274,12 @@ EOF
             st INFO "Fallback: cd /root/hkvm/hkvm && PORT=$PANEL_PORT node app.js"
         fi
     else
-        st WARN "No systemd — using nohup fallback..."
+        st WARN "No systemd — starting in background mode..."
         pkill -f "/root/hkvm/hkvm/app.js" 2>/dev/null || true
         (cd /root/hkvm/hkvm && PORT=$PANEL_PORT HOST=0.0.0.0 nohup node app.js >/var/log/hkvm.log 2>&1 &)
         sleep 3
-        if pgrep -f "/root/hkvm/hkvm/app.js" >/dev/null 2>&1; then
-            st OK "HKVM Panel running (nohup, no systemd)"
+        if pgrep -f "hkvm/hkvm/app.js|node app.js" >/dev/null 2>&1; then
+            st OK "HKVM Panel running (background mode, no systemd)"
             echo -e "  ${W}URL:${NC}  http://$DOMAIN:$PANEL_PORT"
             echo -e "  ${W}Log:${NC}   /var/log/hkvm.log"
             st INFO "Note: auto-start on reboot needs systemd"
@@ -281,13 +295,13 @@ start_service() {
     show_header
     if command -v systemctl >/dev/null 2>&1 && systemctl start hkvm.service 2>/dev/null; then
         st OK "Started (systemd)"
-    elif pgrep -f "/root/hkvm/hkvm/app.js" >/dev/null 2>&1; then
-        st INFO "Already running (nohup)"
+    elif pgrep -f "hkvm/hkvm/app.js|node app.js" >/dev/null 2>&1; then
+        st INFO "Already running (background mode)"
     else
         if [ -f /root/hkvm/hkvm/app.js ]; then
             (cd /root/hkvm/hkvm && PORT=$PANEL_PORT HOST=0.0.0.0 nohup node app.js >/var/log/hkvm.log 2>&1 &)
             sleep 2
-            pgrep -f "/root/hkvm/hkvm/app.js" >/dev/null 2>&1 && st OK "Started (nohup)" || st ERR "Failed — /var/log/hkvm.log"
+            pgrep -f "hkvm/hkvm/app.js|node app.js" >/dev/null 2>&1 && st OK "Started (background mode)" || st ERR "Failed — /var/log/hkvm.log"
         else
             st ERR "Not installed"
         fi
@@ -314,7 +328,7 @@ restart_service() {
     elif [ -f /root/hkvm/hkvm/app.js ]; then
         (cd /root/hkvm/hkvm && PORT=$PANEL_PORT HOST=0.0.0.0 nohup node app.js >/var/log/hkvm.log 2>&1 &)
         sleep 2
-        pgrep -f "/root/hkvm/hkvm/app.js" >/dev/null 2>&1 && st OK "Restarted (nohup)" || st ERR "Failed — /var/log/hkvm.log"
+        pgrep -f "hkvm/hkvm/app.js|node app.js" >/dev/null 2>&1 && st OK "Restarted (background mode)" || st ERR "Failed — /var/log/hkvm.log"
     else
         st ERR "Not installed"
     fi
@@ -326,8 +340,8 @@ service_status() {
     if command -v systemctl >/dev/null 2>&1 && [ "$(cat /proc/1/comm 2>/dev/null)" = "systemd" ]; then
         systemctl status hkvm.service --no-pager -l 2>/dev/null | head -15
     else
-        if pgrep -f "/root/hkvm/hkvm/app.js" >/dev/null 2>&1; then
-            st OK "Running (nohup) PID: $(pgrep -f '/root/hkvm/hkvm/app.js' | head -1)"
+        if pgrep -f "hkvm/hkvm/app.js|node app.js" >/dev/null 2>&1; then
+            st OK "Running (background) PID: $(pgrep -f 'hkvm/hkvm/app.js|node app.js' | head -1)"
         else
             st ERR "Not running"
         fi

@@ -60,7 +60,7 @@ show_header() {
     local status="${R}● NOT INSTALLED${NC}"
     if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet akvm.service 2>/dev/null; then
         status="${G}● RUNNING${NC}"
-    elif pgrep -f "${INSTALL_DIR}/akvm.py" >/dev/null 2>&1; then
+    elif pgrep -f "akvm.py" >/dev/null 2>&1; then
         status="${G}● RUNNING${NC}"
     elif [ -d "$INSTALL_DIR" ]; then
         status="${Y}● INSTALLED${NC}"
@@ -127,7 +127,7 @@ vps_check() {
 
 install_akvm() {
     show_header
-    if [ -f "$INSTALL_DIR/akvm.py" ] && pgrep -f "${INSTALL_DIR}/akvm.py" >/dev/null 2>&1; then
+    if [ -f "$INSTALL_DIR/akvm.py" ] && pgrep -f "akvm.py" >/dev/null 2>&1; then
         st OK "AKVM Panel already installed & running."
         pause; return
     fi
@@ -169,20 +169,40 @@ install_akvm() {
             local uz=1
         fi
     fi
-    [ "$uz" = 0 ] || { st ERR "Unzip failed"; pause; return; }
+    # asli proof = akvm.py file, unzip rc nahi (purane zip warning par rc=1 deti thi)
+    if [ ! -f "$INSTALL_DIR/akvm.py" ]; then
+        st ERR "Extract failed — akvm.py not found"
+        st INFO "Fix: rm -rf $INSTALL_DIR  →  re-run [1] Install"
+        pause; return 1
+    fi
     st OK "Panel files ready ($INSTALL_DIR)"
 
-    st WAIT "Creating Python venv + deps..."
+    st WAIT "Installing Python deps..."
     if [ ! -d "$INSTALL_DIR/venv" ]; then
         python3 -m venv "$INSTALL_DIR/venv" 2>/dev/null || st WARN "venv failed — using system pip"
     fi
+    local PYV="$INSTALL_DIR/venv/bin/python"
+    [ -x "$PYV" ] || PYV="$(command -v python3)"
     if [ -x "$INSTALL_DIR/venv/bin/pip" ]; then
-        run_live "pip-install" "$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt" || st WARN "pip partial fail"
+        run_live "pip-install" "$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt" || \
+            run_live "pip-retry" "$PYV" -m pip install -r "$INSTALL_DIR/requirements.txt" || st WARN "pip partial fail — verifying"
     else
-        run_live "pip-install" pip3 install -r "$INSTALL_DIR/requirements.txt" --break-system-packages 2>/dev/null || \
-        run_live "pip-install" pip3 install -r "$INSTALL_DIR/requirements.txt" || st WARN "pip partial fail"
+        run_live "pip-install" "$PYV" -m pip install -r "$INSTALL_DIR/requirements.txt" --break-system-packages || \
+            run_live "pip-retry" "$PYV" -m pip install -r "$INSTALL_DIR/requirements.txt" || st WARN "pip partial fail — verifying"
     fi
-    st OK "Python environment ready"
+
+    st WAIT "Verifying imports (real check)..."
+    if "$PYV" -c "import flask, werkzeug, psutil, paramiko, bcrypt, cryptography, nacl, discord" 2>/tmp/akvm_imp.log; then
+        st OK "All packages import OK"
+        rm -f /tmp/akvm_imp.log
+    else
+        st ERR "Import check FAILED — panel would crash:"
+        while IFS= read -r l; do echo -e "     ${R}$l${NC}"; done < <(grep -E 'ModuleNotFoundError|ImportError' /tmp/akvm_imp.log 2>/dev/null | tail -2)
+        st INFO "Fix: $PYV -m pip install -r $INSTALL_DIR/requirements.txt"
+        st INFO "then re-run [1] Install from this menu"
+        rm -f /tmp/akvm_imp.log
+        pause; return 1
+    fi
 
     st WAIT "Writing systemd service..."
     local PY="$INSTALL_DIR/venv/bin/python"
@@ -254,12 +274,12 @@ EOF
             st INFO "Fallback: cd $INSTALL_DIR && PORT=$PANEL_PORT $PY akvm.py"
         fi
     else
-        st WARN "No systemd — using nohup fallback..."
+        st WARN "No systemd — starting in background mode..."
         pkill -f "${INSTALL_DIR}/akvm.py" 2>/dev/null || true
         (cd "$INSTALL_DIR" && PORT=$PANEL_PORT HOST=0.0.0.0 nohup "$PY" akvm.py >/var/log/akvm.log 2>&1 &)
         sleep 3
-        if pgrep -f "${INSTALL_DIR}/akvm.py" >/dev/null 2>&1; then
-            st OK "AKVM Panel running (nohup, no systemd)"
+        if pgrep -f "akvm.py" >/dev/null 2>&1; then
+            st OK "AKVM Panel running (background mode, no systemd)"
             echo -e "  ${W}URL:${NC}  http://$DOMAIN:$PANEL_PORT"
             echo -e "  ${W}Log:${NC}   /var/log/akvm.log"
             st INFO "Note: auto-start on reboot needs systemd"
@@ -277,13 +297,13 @@ start_service() {
     [ -x "$PY" ] || PY="$(command -v python3)"
     if command -v systemctl >/dev/null 2>&1 && systemctl start akvm.service 2>/dev/null; then
         st OK "Started (systemd)"
-    elif pgrep -f "${INSTALL_DIR}/akvm.py" >/dev/null 2>&1; then
-        st INFO "Already running (nohup)"
+    elif pgrep -f "akvm.py" >/dev/null 2>&1; then
+        st INFO "Already running (background mode)"
     else
         if [ -f "$INSTALL_DIR/akvm.py" ]; then
             (cd "$INSTALL_DIR" && PORT=$PANEL_PORT HOST=0.0.0.0 nohup "$PY" akvm.py >/var/log/akvm.log 2>&1 &)
             sleep 2
-            pgrep -f "${INSTALL_DIR}/akvm.py" >/dev/null 2>&1 && st OK "Started (nohup)" || st ERR "Failed — /var/log/akvm.log"
+            pgrep -f "akvm.py" >/dev/null 2>&1 && st OK "Started (background mode)" || st ERR "Failed — /var/log/akvm.log"
         else
             st ERR "Not installed"
         fi
@@ -312,7 +332,7 @@ restart_service() {
     elif [ -f "$INSTALL_DIR/akvm.py" ]; then
         (cd "$INSTALL_DIR" && PORT=$PANEL_PORT HOST=0.0.0.0 nohup "$PY" akvm.py >/var/log/akvm.log 2>&1 &)
         sleep 2
-        pgrep -f "${INSTALL_DIR}/akvm.py" >/dev/null 2>&1 && st OK "Restarted (nohup)" || st ERR "Failed — /var/log/akvm.log"
+        pgrep -f "akvm.py" >/dev/null 2>&1 && st OK "Restarted (background mode)" || st ERR "Failed — /var/log/akvm.log"
     else
         st ERR "Not installed"
     fi
@@ -324,8 +344,8 @@ service_status() {
     if command -v systemctl >/dev/null 2>&1 && [ "$(cat /proc/1/comm 2>/dev/null)" = "systemd" ]; then
         systemctl status akvm.service --no-pager -l 2>/dev/null | head -15
     else
-        if pgrep -f "${INSTALL_DIR}/akvm.py" >/dev/null 2>&1; then
-            st OK "Running (nohup) PID: $(pgrep -f "${INSTALL_DIR}/akvm.py" | head -1)"
+        if pgrep -f "akvm.py" >/dev/null 2>&1; then
+            st OK "Running (background) PID: $(pgrep -f "akvm.py" | head -1)"
         else
             st ERR "Not running"
         fi
