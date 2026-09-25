@@ -142,11 +142,11 @@ EOF
 }
 
 install_deps() {
-    st WAIT "Installing Python dependencies (discord.py, requests)..."
+    st WAIT "Installing Python dependencies (discord.py, requests, python-dotenv)..."
     local log rc
     log="$(mktemp /tmp/hn_pip.XXXXXX)"
-    python3 -m pip install -U discord.py requests >"$log" 2>&1 \
-        || pip3 install -U discord.py requests >>"$log" 2>&1
+    python3 -m pip install -U discord.py requests python-dotenv >"$log" 2>&1 \
+        || pip3 install -U discord.py requests python-dotenv >>"$log" 2>&1
     rc=$?
     if [ "$rc" -ne 0 ]; then
         st WARN "pip reported errors — last lines:"
@@ -156,9 +156,10 @@ install_deps() {
     local miss=0
     python3 -c "import discord" 2>/dev/null || { st ERR "missing: discord.py"; miss=1; }
     python3 -c "import requests" 2>/dev/null || { st ERR "missing: requests"; miss=1; }
+    python3 -c "import dotenv" 2>/dev/null || { st ERR "missing: python-dotenv"; miss=1; }
     if [ "$miss" = 1 ]; then
         st ERR "Import check failed — bot cannot start"
-        st INFO "retry: python3 -m pip install -U discord.py requests"
+        st INFO "retry: python3 -m pip install -U discord.py requests python-dotenv"
         return 1
     fi
     st OK "Dependencies verified"
