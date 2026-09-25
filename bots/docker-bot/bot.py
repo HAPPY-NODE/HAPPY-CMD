@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 load_dotenv()
 
 # Configuration from .env
-TOKEN = os.getenv('TOKEN', 'DISCORD_BOT_TOKEN')
+TOKEN = os.getenv('TOKEN', '')
 ADMIN_ID = int(os.getenv('ADMIN_ID', 0))  # Admin user ID for checks
 BOT_STATUS_NAME = os.getenv('BOT_STATUS_NAME', 'HAPPY NODE')
 WATERMARK = os.getenv('WATERMARK', 'Powered by HAPPY NODE VPS Bot')

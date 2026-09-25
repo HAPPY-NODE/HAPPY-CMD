@@ -57,14 +57,14 @@ section_enter() {
 }
 
 svc_dot() {
-    local unit="$1"
-    if systemctl is-active --quiet "$unit" 2>/dev/null; then
-        echo -e "${FG}●${NC}"
-    elif [ -f "/etc/systemd/system/$unit" ]; then
-        echo -e "${FY}●${NC}"
-    else
-        echo -e "${FR}●${NC}"
-    fi
+    local unit="$1" s
+    s=$(systemctl is-active "$unit" 2>/dev/null)
+    case "$s" in
+        active)      echo -e "${FG}●${NC}" ;;
+        activating|reloading|deactivating) echo -e "${FY}●${NC}" ;;
+        failed)      echo -e "${FR}●${NC}" ;;
+        *)           if [ -f "/etc/systemd/system/$unit" ]; then echo -e "${FY}●${NC}"; else echo -e "${DG}●${NC}"; fi ;;
+    esac
 }
 
 show_header() {
@@ -75,7 +75,7 @@ show_header() {
     printf "  ${CB}│${NC}  ${TE}docker + lxc bot installers${NC}                          ${CB}│${NC}\n"
     printf "  ${CB}└──────────────────────────────────────────────────────────┘${NC}\n"
     echo ""
-    printf "  ${SL}order${NC}  ${CB}token → admin id → optional vars${NC}\n"
+    printf "  ${SL}order${NC}  ${CB}token → admin id (baaki defaults)${NC}\n"
     printf "  ${SL}brand${NC}  ${GR}HAPPY-NODE${NC} ${SL}github.com/HAPPY-NODE${NC}\n"
     echo ""
 }
@@ -87,11 +87,46 @@ show_menu() {
     printf "   ${GR}2${NC}  ${GR}ʟxᴄ ᴠᴘꜱ ʙᴏᴛ${NC}         %s  ${SL}prefix cmds • lxc • economy${NC}\n" "$(svc_dot happy-lxc-bot.service)"
     printf "   ${GR}3${NC}  ${GR}ꜱᴠᴍ ᴠ9 ʟxᴄ ʙᴏᴛ${NC}      %s  ${SL}multi-node • ports • admins${NC}\n" "$(svc_dot happy-svm-bot.service)"
     printf "   ${GR}4${NC}  ${GR}ᴅᴏᴄᴋᴇʀ ꜱꜱʜx ʙᴏᴛ${NC}    %s  ${SL}docker • browser sshx link${NC}\n" "$(svc_dot happy-sshx-bot.service)"
+    printf "   ${GR}5${NC}  ${GR}sᴛᴀᴛᴜs & ᴅᴇʙᴜɢ${NC}      ${SL}live state + last errors${NC}\n"
     echo ""
     echo -e "  ${CY}────────────────────────────────────────────────────────────────${NC}"
     printf "  ${FR}[0]${NC} ${FR}ʙᴀᴄᴋ${NC}          ${SL}pick a bot number to install${NC}\n"
     echo -e "  ${CY}────────────────────────────────────────────────────────────────${NC}"
-    echo -ne "  ${FC}❯${NC} ${FW}Select${NC} ${SL}(0-4):${NC} "
+    echo -ne "  ${FC}❯${NC} ${FW}Select${NC} ${SL}(0-5):${NC} "
+}
+
+bot_status() {
+    local u s first=1 has_sysd=1
+    command -v systemctl >/dev/null 2>&1 || has_sysd=0
+    for u in happy-docker-bot happy-lxc-bot happy-svm-bot happy-sshx-bot; do
+        [ "$first" = 1 ] && echo "" && first=0
+        if [ "$has_sysd" = 0 ]; then
+            if [ -f "/etc/systemd/system/$u.service" ]; then
+                echo -e "  ${FY}●${NC} ${W}$u${NC}  ${FY}unit written (no systemctl here)${NC}"
+            else
+                echo -e "  ${DG}●${NC} ${W}$u${NC}  ${DG}not installed${NC}"
+            fi
+            continue
+        fi
+        s=$(systemctl is-active "$u.service" 2>/dev/null)
+        [ -z "$s" ] && s="unknown"
+        case "$s" in
+            active)          echo -e "  ${FG}●${NC} ${W}$u${NC}  ${FG}$s${NC}" ;;
+            failed)          echo -e "  ${FR}●${NC} ${W}$u${NC}  ${FR}$s${NC}" ;;
+            activating)      echo -e "  ${FY}●${NC} ${W}$u${NC}  ${FY}$s (crash-restarting?)${NC}" ;;
+            *)               if [ -f "/etc/systemd/system/$u.service" ]; then
+                                 echo -e "  ${FY}●${NC} ${W}$u${NC}  ${FY}$s${NC}"
+                             else
+                                 echo -e "  ${DG}●${NC} ${W}$u${NC}  ${DG}$s (not installed)${NC}"
+                             fi ;;
+        esac
+        if [ "$s" = "failed" ] || [ "$s" = "activating" ]; then
+            journalctl -u "$u.service" -n 8 --no-pager 2>/dev/null | sed 's/^/      /' | tail -6
+            echo -e "      ${SL}fix: edit /root/happy-*/.env then systemctl restart $u${NC}"
+        fi
+    done
+    echo ""
+    echo -e "  ${SL}dots:${NC} ${FG}● active${NC} ${FY}● starting/stopped${NC} ${FR}● failed${NC} ${DG}● not installed${NC}"
 }
 
 run_card() {
@@ -109,6 +144,7 @@ while true; do
         2) run_card "LXC VPS Bot" "bots/lxc.sh" ;;
         3) run_card "SVM V9 Bot" "bots/svm.sh" ;;
         4) run_card "Docker SSHX Bot" "bots/sshx.sh" ;;
+        5) section_enter "Bot Status"; bot_status; pause ;;
         0) dots_load "Closing bots" 2; exit 0 ;;
         *) echo -e "  ${FR}✗${NC} ${FW}Invalid option${NC}"; sleep 0.7 ;;
     esac
