@@ -3211,8 +3211,8 @@ async def reload_env(ctx):
         global BOT_NAME, PREFIX, BOT_VERSION, BOT_DEVELOPER, MAIN_ADMIN_ID
         global YOUR_SERVER_IP, DEFAULT_STORAGE_POOL, CPU_THRESHOLD, RAM_THRESHOLD
         global VPS_USER_ROLE_ID
-        
-BOT_NAME = os.getenv('BOT_NAME', 'HAPPY NODE')
+
+        BOT_NAME = os.getenv('BOT_NAME', 'HAPPY NODE')
         PREFIX = os.getenv('PREFIX', '!')
         BOT_VERSION = os.getenv('BOT_VERSION', '7.1-PRO')
         BOT_DEVELOPER = os.getenv('BOT_DEVELOPER', 'Developer')
