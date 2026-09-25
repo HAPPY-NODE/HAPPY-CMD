@@ -12,7 +12,7 @@ fi
 
 HN_BASE_URL="${HN_BASE_URL:-https://raw.githubusercontent.com/HAPPY-NODE/HAPPY-CMD/main}"
 IMG_URL="https://i.postimg.cc/jdbphsXP/Chat-GPT-Image-Sep-23-2026-05-48-16-PM.png"
-BOT_HOME="/root/happy-sshx-bot"
+BOT_HOME="${BOT_HOME:-/root/happy-sshx-bot}"
 UNIT="happy-sshx-bot.service"
 SRC_REL="bots/sshx-bot"
 
@@ -68,33 +68,30 @@ deploy_bot() {
 
 prompt_env() {
     echo ""
-    echo -e "  ${FC}◆${NC} ${FW}Bot Configuration${NC} ${SL}(token → admin id → optional)${NC}"
+    echo -e "  ${FC}◆${NC} ${FW}Bot Configuration${NC} ${SL}(only 2 inputs — rest uses defaults)${NC}"
     echo -e "  ${DG}────────────────────────────────────────────────────────────────${NC}"
-    read -rp "  ${CY}1) Discord Bot Token:${NC} " TOKEN
-    read -rp "  ${CY}2) Admin Discord ID:${NC} " ADMIN_ID
-    read -rp "  ${CY}3) Status name [HAPPY NODE]:${NC} " BOT_STATUS_NAME
-    BOT_STATUS_NAME="${BOT_STATUS_NAME:-HAPPY NODE}"
-    read -rp "  ${CY}4) Watermark [Powered by HAPPY NODE VPS Bot]:${NC} " WATERMARK
-    WATERMARK="${WATERMARK:-Powered by HAPPY NODE VPS Bot}"
-    read -rp "  ${CY}5) Default RAM [2g]:${NC} " DEFAULT_RAM
-    DEFAULT_RAM="${DEFAULT_RAM:-2g}"
-    read -rp "  ${CY}6) Default CPU [1]:${NC} " DEFAULT_CPU
-    DEFAULT_CPU="${DEFAULT_CPU:-1}"
-    read -rp "  ${CY}7) Default Disk [5G]:${NC} " DEFAULT_DISK
-    DEFAULT_DISK="${DEFAULT_DISK:-5G}"
-    read -rp "  ${CY}8) Hostname prefix [happy-node]:${NC} " VPS_HOSTNAME
-    VPS_HOSTNAME="${VPS_HOSTNAME:-happy-node}"
-    read -rp "  ${CY}9) Per-user server limit [3]:${NC} " SERVER_LIMIT
-    SERVER_LIMIT="${SERVER_LIMIT:-3}"
-    read -rp "  ${CY}10) Total server limit [50]:${NC} " TOTAL_SERVER_LIMIT
-    TOTAL_SERVER_LIMIT="${TOTAL_SERVER_LIMIT:-50}"
+    printf "  ${CY}1) Discord Bot Token:${NC} "
+    read -r TOKEN || { echo ""; st ERR "Aborted."; return 1; }
+    printf "  ${CY}2) Admin Discord ID:${NC} "
+    read -r ADMIN_ID || { echo ""; st ERR "Aborted."; return 1; }
 
     if [ -z "$TOKEN" ] || [ -z "$ADMIN_ID" ]; then
         st ERR "Token and Admin ID cannot be empty."
         return 1
     fi
 
-    cat > "$BOT_HOME/.env" <<EOF
+    # defaults — no prompts
+    BOT_STATUS_NAME="HAPPY NODE"
+    WATERMARK="Powered by HAPPY NODE VPS Bot"
+    DEFAULT_RAM="2g"
+    DEFAULT_CPU="1"
+    DEFAULT_DISK="5G"
+    VPS_HOSTNAME="happy-node"
+    SERVER_LIMIT="3"
+    TOTAL_SERVER_LIMIT="50"
+
+    mkdir -p "$BOT_HOME" || { st ERR "Cannot create $BOT_HOME"; return 1; }
+    if ! cat > "$BOT_HOME/.env" <<EOF
 TOKEN=$TOKEN
 ADMIN_ID=$ADMIN_ID
 BOT_STATUS_NAME=$BOT_STATUS_NAME
@@ -107,8 +104,18 @@ SERVER_LIMIT=$SERVER_LIMIT
 TOTAL_SERVER_LIMIT=$TOTAL_SERVER_LIMIT
 DATABASE_FILE=vps_bot.db
 EOF
-    chmod 600 "$BOT_HOME/.env"
-    st OK ".env written"
+    then
+        st ERR ".env write failed — cannot create $BOT_HOME/.env"
+        return 1
+    fi
+    chmod 600 "$BOT_HOME/.env" 2>/dev/null || true
+    if [ -s "$BOT_HOME/.env" ]; then
+        st OK ".env written → $BOT_HOME/.env"
+        st INFO "Defaults set — edit that file anytime to customize"
+    else
+        st ERR ".env write failed"
+        return 1
+    fi
 }
 
 install_deps() {
@@ -120,6 +127,10 @@ install_deps() {
 }
 
 create_service() {
+    if [ ! -d /etc/systemd/system ]; then
+        st WARN "systemd not found — service skipped"
+        return 0
+    fi
     st WAIT "Creating systemd unit $UNIT ..."
     cat > "/etc/systemd/system/$UNIT" <<EOF
 [Unit]
@@ -139,9 +150,9 @@ EnvironmentFile=$BOT_HOME/.env
 [Install]
 WantedBy=multi-user.target
 EOF
-    systemctl daemon-reload
+    systemctl daemon-reload 2>/dev/null || { st WARN "daemon-reload failed"; return 0; }
     systemctl enable "$UNIT" >/dev/null 2>&1 || true
-    systemctl restart "$UNIT"
+    systemctl restart "$UNIT" 2>/dev/null || st WARN "restart failed"
     sleep 1
     if systemctl is-active --quiet "$UNIT"; then
         st OK "Service active"
@@ -167,7 +178,7 @@ final_message() {
 
 main() {
     print_banner
-    if [ "$EUID" -ne 0 ]; then
+    if [ "$EUID" -ne 0 ] && [ "${HN_NO_ROOT_CHECK:-}" != 1 ]; then
         st ERR "Run as root"
         pause
         return 1

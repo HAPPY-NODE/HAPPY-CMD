@@ -12,7 +12,7 @@ fi
 
 HN_BASE_URL="${HN_BASE_URL:-https://raw.githubusercontent.com/HAPPY-NODE/HAPPY-CMD/main}"
 IMG_URL="https://i.postimg.cc/jdbphsXP/Chat-GPT-Image-Sep-23-2026-05-48-16-PM.png"
-BOT_HOME="/root/happy-lxc-bot"
+BOT_HOME="${BOT_HOME:-/root/happy-lxc-bot}"
 UNIT="happy-lxc-bot.service"
 SRC_REL="bots/lxc-bot"
 
@@ -68,31 +68,29 @@ deploy_bot() {
 
 prompt_env() {
     echo ""
-    echo -e "  ${FC}◆${NC} ${FW}Bot Configuration${NC} ${SL}(token → admin id → optional)${NC}"
+    echo -e "  ${FC}◆${NC} ${FW}Bot Configuration${NC} ${SL}(only 2 inputs — rest uses defaults)${NC}"
     echo -e "  ${DG}────────────────────────────────────────────────────────────────${NC}"
-    read -rp "  ${CY}1) Discord Bot Token:${NC} " DISCORD_TOKEN
-    read -rp "  ${CY}2) Main Admin Discord ID:${NC} " MAIN_ADMIN_ID
-    read -rp "  ${CY}3) Bot name [HAPPY NODE]:${NC} " BOT_NAME
-    BOT_NAME="${BOT_NAME:-HAPPY NODE}"
-    read -rp "  ${CY}4) Prefix [!]:${NC} " PREFIX
-    PREFIX="${PREFIX:-!}"
-    read -rp "  ${CY}5) Bot version [v8.0-PRO]:${NC} " BOT_VERSION
-    BOT_VERSION="${BOT_VERSION:-v8.0-PRO}"
-    read -rp "  ${CY}6) Developer [HAPPY-NODE]:${NC} " BOT_DEVELOPER
-    BOT_DEVELOPER="${BOT_DEVELOPER:-HAPPY-NODE}"
-    read -rp "  ${CY}7) Server public IP [127.0.0.1]:${NC} " YOUR_SERVER_IP
-    YOUR_SERVER_IP="${YOUR_SERVER_IP:-127.0.0.1}"
-    read -rp "  ${CY}8) VPS user role ID [0 = auto]:${NC} " VPS_USER_ROLE_ID
-    VPS_USER_ROLE_ID="${VPS_USER_ROLE_ID:-0}"
-    read -rp "  ${CY}9) LXC storage pool [default]:${NC} " DEFAULT_STORAGE_POOL
-    DEFAULT_STORAGE_POOL="${DEFAULT_STORAGE_POOL:-default}"
+    printf "  ${CY}1) Discord Bot Token:${NC} "
+    read -r DISCORD_TOKEN || { echo ""; st ERR "Aborted."; return 1; }
+    printf "  ${CY}2) Main Admin Discord ID:${NC} "
+    read -r MAIN_ADMIN_ID || { echo ""; st ERR "Aborted."; return 1; }
 
     if [ -z "$DISCORD_TOKEN" ] || [ -z "$MAIN_ADMIN_ID" ]; then
         st ERR "Token and Admin ID cannot be empty."
         return 1
     fi
 
-    cat > "$BOT_HOME/.env" <<EOF
+    # defaults — no prompts
+    BOT_NAME="HAPPY NODE"
+    PREFIX="!"
+    BOT_VERSION="v8.0-PRO"
+    BOT_DEVELOPER="HAPPY-NODE"
+    YOUR_SERVER_IP="127.0.0.1"
+    VPS_USER_ROLE_ID="0"
+    DEFAULT_STORAGE_POOL="default"
+
+    mkdir -p "$BOT_HOME" || { st ERR "Cannot create $BOT_HOME"; return 1; }
+    if ! cat > "$BOT_HOME/.env" <<EOF
 DISCORD_TOKEN=$DISCORD_TOKEN
 BOT_NAME=$BOT_NAME
 PREFIX=$PREFIX
@@ -103,8 +101,18 @@ VPS_USER_ROLE_ID=$VPS_USER_ROLE_ID
 YOUR_SERVER_IP=$YOUR_SERVER_IP
 DEFAULT_STORAGE_POOL=$DEFAULT_STORAGE_POOL
 EOF
-    chmod 600 "$BOT_HOME/.env"
-    st OK ".env written"
+    then
+        st ERR ".env write failed — cannot create $BOT_HOME/.env"
+        return 1
+    fi
+    chmod 600 "$BOT_HOME/.env" 2>/dev/null || true
+    if [ -s "$BOT_HOME/.env" ]; then
+        st OK ".env written → $BOT_HOME/.env"
+        st INFO "Defaults set — edit that file anytime to customize"
+    else
+        st ERR ".env write failed"
+        return 1
+    fi
 }
 
 install_deps() {
@@ -116,6 +124,10 @@ install_deps() {
 }
 
 create_service() {
+    if [ ! -d /etc/systemd/system ]; then
+        st WARN "systemd not found — service skipped"
+        return 0
+    fi
     st WAIT "Creating systemd unit $UNIT ..."
     cat > "/etc/systemd/system/$UNIT" <<EOF
 [Unit]
@@ -134,9 +146,9 @@ EnvironmentFile=$BOT_HOME/.env
 [Install]
 WantedBy=multi-user.target
 EOF
-    systemctl daemon-reload
+    systemctl daemon-reload 2>/dev/null || { st WARN "daemon-reload failed"; return 0; }
     systemctl enable "$UNIT" >/dev/null 2>&1 || true
-    systemctl restart "$UNIT"
+    systemctl restart "$UNIT" 2>/dev/null || st WARN "restart failed"
     sleep 1
     if systemctl is-active --quiet "$UNIT"; then
         st OK "Service active"
@@ -161,7 +173,7 @@ final_message() {
 
 main() {
     print_banner
-    if [ "$EUID" -ne 0 ]; then
+    if [ "$EUID" -ne 0 ] && [ "${HN_NO_ROOT_CHECK:-}" != 1 ]; then
         st ERR "Run as root"
         pause
         return 1
