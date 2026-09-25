@@ -80,15 +80,15 @@ show_header() {
 }
 
 # ---------- Menu cell (padded column, own color) ----------
-# 8 distinct glow colors (256-palette, no aliases)
-M1=$'\033[1;96m'   # cyan
-M2=$'\033[38;5;141m'  # light purple
-M3=$'\033[1;93m'   # yellow
-M4=$'\033[38;5;43m'   # teal
-M5=$'\033[38;5;201m'  # pink
-M6=$'\033[1;92m'   # green
-M7=$'\033[38;5;208m'  # orange
-M8=$'\033[38;5;75m'   # soft blue
+# 8 shades: cyan → violet gradient (matches banner)
+M1=$'\033[38;5;51m'   # cyan
+M2=$'\033[38;5;45m'   # sky
+M3=$'\033[38;5;39m'   # blue
+M4=$'\033[38;5;69m'   # periwinkle
+M5=$'\033[38;5;63m'   # violet
+M6=$'\033[38;5;54m'   # purple
+M7=$'\033[38;5;135m'  # lavender
+M8=$'\033[38;5;171m'  # orchid
 
 mk_cell() {
     local n=$1 label=$2 color=$3 cw=${4:-26}
@@ -181,10 +181,10 @@ boot_splash() {
     printf "${NC}\n"
     sleep 0.1
 
-    # 2. HAPPY NODE typing with per-letter color
+    # 2. HAPPY NODE typing with per-letter color (cyan → violet, matches banner)
     printf "  "
     local brand="HAPPY-NODE"
-    local cols=(${FC} ${VI} ${TE} ${FC} ${VI})
+    local cols=($'\033[38;5;51m' $'\033[38;5;45m' $'\033[38;5;39m' $'\033[38;5;63m' $'\033[38;5;135m')
     for ((i=0; i<${#brand}; i++)); do
         ch="${brand:i:1}"
         if [ "$ch" = "-" ]; then
