@@ -103,7 +103,7 @@ run_card() {
 while true; do
     show_header
     show_menu
-    read -r opt
+    read -r opt || exit 0
     case $opt in
         1) run_card "Docker VPS Bot" "bots/docker.sh" ;;
         2) run_card "LXC VPS Bot" "bots/lxc.sh" ;;

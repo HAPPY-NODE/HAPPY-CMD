@@ -340,7 +340,7 @@ fi
 
 while true; do
     show_themes
-    read -r opt
+    read -r opt || exit 0
     if [ "$opt" = "0" ]; then
         st INFO "Goodbye from HAPPY-NODE"
         exit 0
@@ -376,7 +376,7 @@ while true; do
     echo -e "     ${FR}[0]${NC} Back"
     echo -e "  ${DG}────────────────────────────────────────────────────────────────${NC}"
     echo -ne "  ${C}➜${NC} ${W}Action${NC} ${DG}(0-2):${NC} "
-    read -r action
+    read -r action || exit 0
     case $action in
         1)
             case "$SEL_TYPE" in

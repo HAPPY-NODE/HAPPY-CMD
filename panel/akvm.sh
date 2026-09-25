@@ -95,8 +95,9 @@ vps_check() {
     if [ "$has_kvm" = 1 ]; then st OK "KVM / virt (QEMU)"; else st WARN "No /dev/kvm — TCG fallback (slower)"; warn_ok=0; fi
     st INFO "Virt type: $virt"
 
-    free_mb=$(awk '/MemAvailable|MemFree/{print $2; exit}' /proc/meminfo 2>/dev/null)
-    if [ -n "$free_mb" ] && [ "$free_mb" -lt 500000 ] 2>/dev/null; then
+    free_mb=$(awk '/^MemAvailable:/{print $2; exit}' /proc/meminfo 2>/dev/null)
+    [ -z "$free_mb" ] && free_mb=$(awk '/^MemFree:/{print $2; exit}' /proc/meminfo 2>/dev/null)
+    if [ -n "$free_mb" ] && [ "$free_mb" -lt 900000 ] 2>/dev/null; then
         st WARN "Low RAM (~$((free_mb/1024))MB) — 1GB+ recommended"
         warn_ok=0
     fi
@@ -351,8 +352,11 @@ view_logs() {
 
 setup_domain() {
     show_header
-    read -rp "  Enter domain: " DOMAIN
+    read -rp "  Enter domain: " DOMAIN || DOMAIN=""
     [ -z "$DOMAIN" ] && { st ERR "Empty domain"; pause; return; }
+    st WAIT "Installing nginx + certbot..."
+    install_steps "Web stack" nginx certbot python3-certbot-nginx || { st ERR "Install failed."; pause; return; }
+    echo ""
     cat > /etc/nginx/sites-available/akvm.conf <<EOF
 server {
     listen 80;
@@ -372,7 +376,9 @@ server {
 EOF
     ln -sf /etc/nginx/sites-available/akvm.conf /etc/nginx/sites-enabled/akvm.conf
     nginx -t >/dev/null 2>&1 && systemctl reload nginx
-    st OK "Domain set: http://$DOMAIN → :$PANEL_PORT"
+    st WAIT "Requesting SSL certificate..."
+    run_live "certbot" certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email || st ERR "Certbot failed (DNS not pointing?)."
+    st OK "Domain set: https://$DOMAIN → :$PANEL_PORT"
     pause
 }
 
@@ -407,7 +413,7 @@ while true; do
     echo -e "     ${R}[0]${NC} Back"
     echo -e "  ${DG}────────────────────────────────────────────────────────────────${NC}"
     echo -ne "  ${C}➜${NC} ${W}Enter Option${NC} ${DG}(0-8):${NC} "
-    read -r choice
+    read -r choice || exit 0
     case $choice in
         1) install_akvm ;;
         2) start_service ;;

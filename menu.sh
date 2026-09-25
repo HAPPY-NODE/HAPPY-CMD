@@ -238,6 +238,6 @@ boot_splash
 while true; do
     show_header
     show_menu
-    read -r choice
+    read -r choice || exit 0
     handle_choice "$choice"
 done

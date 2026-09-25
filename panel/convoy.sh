@@ -58,20 +58,23 @@ install_convoy() {
     mkdir -p /var/www/convoy
     cd /var/www/convoy || { st ERR "mkdir failed"; pause; return; }
     run_dl "Convoy panel.tar.gz" "https://github.com/convoypanel/panel/releases/latest/download/panel.tar.gz" panel.tar.gz || { st ERR "Download failed"; pause; return; }
-    tar -xzf panel.tar.gz && rm -f panel.tar.gz
+    tar -xzf panel.tar.gz || { st ERR "Extract failed."; pause; return; }
+    rm -f panel.tar.gz
     chmod -R o+w storage/* bootstrap/cache/
+    # .env ke bina compose up boot hi nahi hota — example se banao
+    [ -f .env ] || cp -f .env.example .env 2>/dev/null || true
     st WAIT "Starting containers..."
     run_live "docker-compose" docker compose up -d || { st ERR "docker compose up failed (check .env)"; pause; return; }
     echo ""
     st WAIT "Installing dependencies..."
-    run_live "composer" docker compose exec workspace bash -c "composer install --no-dev --optimize-autoloader"
+    run_live "composer" docker compose exec -T workspace bash -c "composer install --no-dev --optimize-autoloader" || st ERR "composer install failed."
     st WAIT "Generating app key..."
-    docker compose exec workspace bash -c "php artisan key:generate --force && php artisan optimize"
+    docker compose exec -T workspace bash -c "php artisan key:generate --force && php artisan optimize" || st ERR "key:generate failed."
     st WAIT "Migrating database..."
-    docker compose exec workspace php artisan migrate --force
+    docker compose exec -T workspace php artisan migrate --force || st ERR "migrate failed."
     echo ""
     st OK "Convoy installed."
-    echo -e "  ${SL}Next:${NC} edit ${W}/var/www/convoy/.env${NC} ${SL}(DB etc), then${NC} docker compose up -d"
+    echo -e "  ${SL}Next:${NC} check ${W}/var/www/convoy/.env${NC} ${SL}if needed, then${NC} docker compose up -d"
     pause
 }
 
@@ -83,13 +86,14 @@ update_panel() {
     fi
     st WAIT "Updating..."
     cd /var/www/convoy || return
-    docker compose exec workspace php artisan down 2>/dev/null
+    docker compose exec -T workspace php artisan down 2>/dev/null
     run_dl "Convoy panel.tar.gz" "https://github.com/convoypanel/panel/releases/latest/download/panel.tar.gz" panel.tar.gz || { st ERR "Download failed"; pause; return; }
-    tar -xzf panel.tar.gz
+    tar -xzf panel.tar.gz || { st ERR "Extract failed."; pause; return; }
+    rm -f panel.tar.gz
     chmod -R o+w storage/* bootstrap/cache/
-    run_live "composer" docker compose exec workspace bash -c "composer install --no-dev --optimize-autoloader"
-    docker compose exec workspace php artisan migrate --force
-    docker compose exec workspace php artisan up
+    run_live "composer" docker compose exec -T workspace bash -c "composer install --no-dev --optimize-autoloader"
+    docker compose exec -T workspace php artisan migrate --force
+    docker compose exec -T workspace php artisan up
     st OK "Updated."
     pause
 }
@@ -116,7 +120,7 @@ while true; do
     echo -e "     ${R}[0]${NC} Back"
     echo -e "  ${DG}────────────────────────────────────────────────────────────────${NC}"
     echo -ne "  ${C}➜${NC} ${W}Enter Option${NC} ${DG}(0-3):${NC} "
-    read -r choice
+    read -r choice || exit 0
     case $choice in
         1) install_convoy ;;
         2) update_panel ;;

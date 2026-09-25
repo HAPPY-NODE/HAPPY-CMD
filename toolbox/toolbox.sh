@@ -115,7 +115,7 @@ while true; do
     echo -e "     ${FR}[0]${NC} ${FR}ʙᴀᴄᴋ${NC}"
     echo -e "  ${GY}────────────────────────────────────────────────────────────────${NC}"
     echo -ne "  ${FC}➜${NC} ${FW}Enter Option${NC} ${SL}(0-8):${NC} "
-    read -r opt
+    read -r opt || exit 0
     case $opt in
         1) run_tool "Root Access" "toolbox/root.sh" ;;
         2) run_tool "Tailscale" "toolbox/tailscale.sh" ;;

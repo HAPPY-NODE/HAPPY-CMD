@@ -76,8 +76,11 @@ install_ptero() {
         st ERR "Download failed. Check network."
         pause; return
     fi
-    bash /tmp/ptero_install.sh || st ERR "Install failed."
-    st OK "Installation complete."
+    if bash /tmp/ptero_install.sh; then
+        st OK "Installation complete."
+    else
+        st ERR "Install failed."
+    fi
     pause
 }
 
@@ -91,7 +94,7 @@ create_user() {
     fi
     echo -e "  ${GR}[1]${NC} Custom User Create"
     echo -e "  ${GR}[2]${NC} Auto Create Admin User"
-    read -rp "  Choice: " choice
+    read -rp "  Choice: " choice || choice=""
     cd /var/www/pterodactyl || return
     if [ "$choice" = "1" ]; then
         st WAIT "Launching manual user creation..."
@@ -101,15 +104,18 @@ create_user() {
         local USERNAME="user$(openssl rand -hex 2)"
         local PASSWORD="$(openssl rand -base64 10)"
         local EMAIL="$(openssl rand -base64 4)@email.com"
-        php artisan p:user:make -n \
+        if php artisan p:user:make -n \
             --email="$EMAIL" --username="$USERNAME" \
             --password="$PASSWORD" --admin=1 \
-            --name-first=Admin --name-last=User
-        echo ""
-        st OK "Auto User Created!"
-        echo -e "  ${W}Username:${NC} $USERNAME"
-        echo -e "  ${W}Password:${NC} $PASSWORD"
-        echo -e "  ${W}Email:${NC}    $EMAIL"
+            --name-first=Admin --name-last=User; then
+            echo ""
+            st OK "Auto User Created!"
+            echo -e "  ${W}Username:${NC} $USERNAME"
+            echo -e "  ${W}Password:${NC} $PASSWORD"
+            echo -e "  ${W}Email:${NC}    $EMAIL"
+        else
+            st ERR "User creation failed (check panel install)."
+        fi
     else
         st ERR "Invalid option."
     fi
@@ -141,17 +147,19 @@ update_panel() {
     else
         ptero_url="https://github.com/pterodactyl/panel/releases/download/${ver}/panel.tar.gz"
     fi
-    run_dl "Pterodactyl panel.tar.gz" "$ptero_url" panel.tar.gz || { st ERR "Download failed"; pause; return; }
-    tar -xzf panel.tar.gz
+    run_dl "Pterodactyl panel.tar.gz" "$ptero_url" panel.tar.gz || { st ERR "Download failed"; php artisan up; pause; return; }
+    tar -xzf panel.tar.gz || { st ERR "Extract failed."; php artisan up; pause; return; }
+    rm -f panel.tar.gz
     chmod -R 755 storage/* bootstrap/cache/
     st WAIT "Updating dependencies..."
-    run_live "composer" env COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --optimize-autoloader
+    local ok=1
+    run_live "composer" env COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --optimize-autoloader || ok=0
     st WAIT "Migrating..."
-    php artisan migrate --seed --force
-    chown -R www-data:www-data /var/www/pterodactyl/*
+    php artisan migrate --seed --force || ok=0
+    chown -R www-data:www-data /var/www/pterodactyl/* 2>/dev/null || true
     php artisan queue:restart
     php artisan up
-    st OK "Panel updated to $ver."
+    if [ "$ok" = 1 ]; then st OK "Panel updated to $ver."; else st ERR "Update finished with errors (see above)."; fi
     pause
 }
 
@@ -172,6 +180,9 @@ setup_ssl() {
     install_steps "Web stack" nginx certbot python3-certbot-nginx || { st ERR "Install failed."; pause; return; }
     echo ""
     st WAIT "Writing nginx config..."
+    local PHP_SOCK
+    PHP_SOCK="$(ls /run/php/php*-fpm.sock 2>/dev/null | head -1)"
+    [ -z "$PHP_SOCK" ] && PHP_SOCK="/run/php/php8.3-fpm.sock"
     cat > /etc/nginx/sites-available/pterodactyl.conf <<EOF
 server {
     listen 80;
@@ -183,7 +194,7 @@ server {
     }
     location ~ \.php\$ {
         fastcgi_split_path_info ^(.+\.php)(/.+)\$;
-        fastcgi_pass unix:/run/php/php8.3-fpm.sock;
+        fastcgi_pass unix:$PHP_SOCK;
         fastcgi_index index.php;
         include fastcgi_params;
         fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
@@ -215,11 +226,12 @@ install_phpmyadmin() {
     st WAIT "Downloading phpMyAdmin..."
     local PMA_VER
     PMA_VER=$(curl -s "https://api.github.com/repos/phpmyadmin/phpmyadmin/releases/latest" 2>/dev/null | grep '"tag_name"' | cut -d'"' -f4)
-    [ -z "$PMA_VER" ] && PMA_VER="latest"
+    [ -z "$PMA_VER" ] && PMA_VER="5.2.1"
     echo -e "  ${W}Version:${NC} $PMA_VER"
     cd /var/www || { st ERR "No /var/www"; pause; return; }
     run_dl "phpMyAdmin.tar.gz" "https://files.phpmyadmin.net/phpMyAdmin/${PMA_VER#phpMyAdmin-}/phpMyAdmin-${PMA_VER#phpMyAdmin-}-all-languages.tar.gz" pma.tar.gz || { st ERR "Download failed"; pause; return; }
-    tar -xzf pma.tar.gz && rm -f pma.tar.gz
+    tar -xzf pma.tar.gz || { st ERR "Extract failed."; pause; return; }
+    rm -f pma.tar.gz
     rm -rf phpmyadmin
     mv "phpMyAdmin-${PMA_VER#phpMyAdmin-}-all-languages" phpmyadmin 2>/dev/null || mv phpMyAdmin-*-all-languages phpmyadmin 2>/dev/null
     chown -R www-data:www-data /var/www/phpmyadmin
@@ -266,7 +278,7 @@ while true; do
     echo -e "     ${R}[0]${NC} Back"
     echo -e "  ${DG}────────────────────────────────────────────────────────────────${NC}"
     echo -ne "  ${C}➜${NC} ${W}Enter Option${NC} ${DG}(0-6):${NC} "
-    read -r choice
+    read -r choice || exit 0
     case $choice in
         1) install_ptero ;;
         2) create_user ;;

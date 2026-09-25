@@ -118,7 +118,7 @@ auto_setup() {
         echo -e "     ${R}[0]${NC} Back"
         echo -e "  ${DG}────────────────────────────────────────────────────────────────${NC}"
         echo -ne "  ${C}➜${NC} ${W}Setup Action${NC} ${DG}(0-2):${NC} "
-        read -r s_choice
+        read -r s_choice || exit 0
         case $s_choice in
             1)
                 hn_run "wings/config.sh"
@@ -154,7 +154,7 @@ node_menu() {
         echo -e "     ${R}[0]${NC} Back"
         echo -e "  ${DG}────────────────────────────────────────────────────────────────${NC}"
         echo -ne "  ${C}➜${NC} ${W}Setup Action${NC} ${DG}(0-3):${NC} "
-        read -r s_choice
+        read -r s_choice || exit 0
         case $s_choice in
             1) create_node_ssl; pause ;;
             2) create_node_local; pause ;;
@@ -176,7 +176,7 @@ while true; do
     echo -e "     ${R}[0]${NC} Back"
     echo -e "  ${DG}────────────────────────────────────────────────────────────────${NC}"
     echo -ne "  ${C}➜${NC} ${W}Command${NC} ${DG}(0-6/A):${NC} "
-    read -r choice
+    read -r choice || exit 0
     case $choice in
         1) sudo systemctl start "$SERVICE"; st OK "Started"; sleep 1 ;;
         2) sudo systemctl restart "$SERVICE"; st OK "Restarted"; sleep 1 ;;
@@ -205,7 +205,7 @@ while true; do
                 echo -e "     ${R}[0]${NC} Back"
                 echo -e "  ${DG}────────────────────────────────────────────────────────────────${NC}"
                 echo -ne "  ${C}➜${NC} ${W}Choice${NC} ${DG}(0-1):${NC} "
-                read -r sc
+                read -r sc || exit 0
                 case $sc in
                     1) hn_run "wings/config.sh"; pause ;;
                     0) break ;;

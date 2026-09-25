@@ -46,10 +46,13 @@ install_revi() {
     sleep 0.5
     if ! run_dl "Reviactyl installer" "https://raw.githubusercontent.com/reviactyl/installer/main/reviactyl.sh" /tmp/reviactyl_install.sh; then
         st ERR "Download failed."
-    else
-        bash /tmp/reviactyl_install.sh || st ERR "Install failed."
+        pause; return
     fi
-    st OK "Installation complete."
+    if bash /tmp/reviactyl_install.sh; then
+        st OK "Installation complete."
+    else
+        st ERR "Install failed."
+    fi
     pause
 }
 
@@ -80,15 +83,17 @@ update_panel() {
     st WAIT "Updating..."
     cd /var/www/reviactyl || return
     php artisan down
+    run_dl "Reviactyl panel.tar.gz" "https://github.com/reviactyl/panel/releases/latest/download/panel.tar.gz" /tmp/reviactyl_panel.tar.gz || { st ERR "Download failed — panel NOT wiped"; php artisan up; pause; return; }
     rm -rf /var/www/reviactyl/*
-    run_dl "Reviactyl panel.tar.gz" "https://github.com/reviactyl/panel/releases/latest/download/panel.tar.gz" panel.tar.gz || { st ERR "Download failed"; pause; return; }
-    tar -xzf panel.tar.gz
-    chmod -R 755 storage/* bootstrap/cache/
-    run_live "composer" env COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --optimize-autoloader
-    php artisan migrate --seed --force
-    chown -R www-data:www-data /var/www/reviactyl/*
+    tar -xzf /tmp/reviactyl_panel.tar.gz || { st ERR "Extract failed."; php artisan up; pause; return; }
+    rm -f /tmp/reviactyl_panel.tar.gz
+    chmod -R 755 storage/* bootstrap/cache/ 2>/dev/null || true
+    local ok=1
+    run_live "composer" env COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --optimize-autoloader || ok=0
+    php artisan migrate --seed --force || ok=0
+    chown -R www-data:www-data /var/www/reviactyl/* 2>/dev/null || true
     php artisan up
-    st OK "Updated."
+    if [ "$ok" = 1 ]; then st OK "Updated."; else st ERR "Update finished with errors (see above)."; fi
     pause
 }
 
@@ -161,7 +166,7 @@ while true; do
     echo -e "     ${R}[0]${NC} Back"
     echo -e "  ${DG}────────────────────────────────────────────────────────────────${NC}"
     echo -ne "  ${C}➜${NC} ${W}Enter Option${NC} ${DG}(0-5):${NC} "
-    read -r choice
+    read -r choice || exit 0
     case $choice in
         1) install_revi ;;
         2) create_user ;;

@@ -139,7 +139,7 @@ package_manager_menu() {
         echo -e "     ${R}[0]${NC} Back"
         echo -e "  ${DG}────────────────────────────────────────────────────────────────${NC}"
         echo -ne "  ${C}➜${NC} ${W}Enter Option${NC} ${DG}(0-6):${NC} "
-        read -r pkg_opt
+        read -r pkg_opt || exit 0
         case $pkg_opt in
             1) manage_tool "sshx" ;;
             2) manage_tool "tmate" ;;
@@ -214,7 +214,7 @@ while true; do
     echo -e "     ${R}[0]${NC} Back"
     echo -e "  ${DG}────────────────────────────────────────────────────────────────${NC}"
     echo -ne "  ${C}➜${NC} ${W}Enter Option${NC} ${DG}(0-9):${NC} "
-    read -r option
+    read -r option || exit 0
     case $option in
         1) sshx_run ;;
         2) tmate_run ;;

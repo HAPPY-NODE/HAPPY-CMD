@@ -130,7 +130,7 @@ while true; do
     echo -e "     ${FR}[0]${NC} ${FR}ʙᴀᴄᴋ${NC}"
     echo -e "  ${GY}────────────────────────────────────────────────────────────────${NC}"
     echo -ne "  ${FC}➜${NC} ${FW}Enter Option${NC} ${SL}(0-5):${NC} "
-    read -r opt
+    read -r opt || exit 0
     case $opt in
         1) ssl_setup ;;
         2)

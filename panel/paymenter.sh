@@ -60,7 +60,8 @@ install_pay() {
     mkdir -p /var/www/paymenter
     cd /var/www/paymenter || { st ERR "mkdir failed"; pause; return; }
     run_dl "paymenter.tar.gz" "https://github.com/paymenter/paymenter/releases/latest/download/paymenter.tar.gz" /tmp/paymenter.tar.gz || { st ERR "Download failed"; pause; return; }
-    tar -xzf /tmp/paymenter.tar.gz && rm -f /tmp/paymenter.tar.gz
+    tar -xzf /tmp/paymenter.tar.gz || { st ERR "Extract failed."; pause; return; }
+    rm -f /tmp/paymenter.tar.gz
     chmod -R 755 storage/* bootstrap/cache/
     echo ""
     st WAIT "Creating database..."
@@ -76,7 +77,7 @@ SQL
     cp -f .env.example .env
     sed -i "s/^DB_DATABASE=.*/DB_DATABASE=paymenter/" .env
     sed -i "s/^DB_USERNAME=.*/DB_USERNAME=paymenter/" .env
-    sed -i "s/^DB_PASSWORD=.*/DB_PASSWORD=$DB_PASS/" .env
+    sed -i "s|^DB_PASSWORD=.*|DB_PASSWORD=$DB_PASS|" .env
     run_live "key:generate" php artisan key:generate --force
     php artisan storage:link 2>/dev/null
     st WAIT "Migrating database (this takes a while)..."
@@ -154,6 +155,9 @@ setup_domain() {
     fi
     read -rp "  Panel domain (e.g. pay.yourdomain.com): " DOMAIN
     if [ -z "$DOMAIN" ]; then st ERR "Domain required."; pause; return; fi
+    st WAIT "Installing nginx + certbot..."
+    install_steps "Web stack" nginx certbot python3-certbot-nginx || { st ERR "Install failed."; pause; return; }
+    echo ""
     st WAIT "Writing nginx config..."
     local PHP_SOCK
     PHP_SOCK="$(ls /run/php/php*-fpm.sock 2>/dev/null | head -1)"
@@ -210,7 +214,7 @@ while true; do
     echo -e "     ${R}[0]${NC} Back"
     echo -e "  ${DG}────────────────────────────────────────────────────────────────${NC}"
     echo -ne "  ${C}➜${NC} ${W}Enter Option${NC} ${DG}(0-5):${NC} "
-    read -r choice
+    read -r choice || exit 0
     case $choice in
         1) install_pay ;;
         2) create_user ;;

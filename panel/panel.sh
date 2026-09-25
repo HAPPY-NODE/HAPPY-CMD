@@ -161,7 +161,7 @@ run_panel() {
 panel_intro
 while true; do
     show_header
-    read -r opt
+    read -r opt || exit 0
     case "$opt" in
         1) run_panel "HVM Panel" "panel/hvm.sh" ;;
         2) run_panel "HKVM Panel" "panel/hkvm.sh" ;;

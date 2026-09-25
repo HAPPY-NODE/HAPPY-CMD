@@ -106,10 +106,11 @@ run_dl() {
 # Usage: run_live "Message" cmd args...
 run_live() {
     local msg="$1"; shift
-    local log; log="$(mktemp /tmp/hn_live.XXXXXX)"
+    local log; log="$(mktemp /tmp/hn_live.XXXXXX)" || { printf "  \033[1;91mx\033[0m mktemp failed\n"; return 1; }
     local frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
     local i=0 rc line
-    "$@" >"$log" 2>&1 &
+    # stdin /dev/null: interactive commands ko background me hang hone se bachata hai
+    "$@" >"$log" 2>&1 </dev/null &
     local pid=$!
     while kill -0 "$pid" 2>/dev/null; do
         line=$(grep -E '^(Get:|Hit:|Ign:|Unpacking:|Setting up:|Selecting:|Preparing:|Downloading:|Extracting:|Processing:|Building:|Rebuilding:|Adding:|Enabling:|Synchronizing:|Created symlink|update-alternatives)' "$log" 2>/dev/null | tail -1)
@@ -139,6 +140,7 @@ install_steps() {
     done
     echo ""
     if command -v apt-get >/dev/null 2>&1; then
+        run_live "apt-update" env DEBIAN_FRONTEND=noninteractive apt-get update -y -q || true
         run_live "apt" env DEBIAN_FRONTEND=noninteractive apt-get install -y -q "${pkgs[@]}"
     elif command -v yum >/dev/null 2>&1; then
         run_live "yum" yum install -y "${pkgs[@]}"

@@ -78,7 +78,7 @@ show_vps_menu() {
 # ---------- Main ----------
 while true; do
     show_vps_menu
-    read -r opt
+    read -r opt || exit 0
     case "$opt" in
         1)
             if [ -e /dev/kvm ] && [ -r /dev/kvm ]; then

@@ -164,7 +164,7 @@ while true; do
     echo -e "     ${R}[0]${NC} Back"
     echo -e "  ${DG}────────────────────────────────────────────────────────────────${NC}"
     echo -ne "  ${C}➜${NC} ${W}Enter Option${NC} ${DG}(0-4):${NC} "
-    read -r option
+    read -r option || exit 0
     case $option in
         1) enable_access ;;
         2) secure_lockdown ;;

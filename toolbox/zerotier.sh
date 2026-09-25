@@ -88,7 +88,7 @@ while true; do
     echo -e "     ${R}[0]${NC} Back"
     echo -e "  ${DG}────────────────────────────────────────────────────────────────${NC}"
     echo -ne "  ${C}➜${NC} ${W}Enter Option${NC} ${DG}(0-3):${NC} "
-    read -r choice
+    read -r choice || exit 0
     case $choice in
         1) join_network ;;
         2) remove_network ;;

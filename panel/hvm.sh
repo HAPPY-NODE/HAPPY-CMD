@@ -96,8 +96,9 @@ install_hvm() {
     st INFO "Virt type: $virt"
     if [ "$has_snap" = 1 ]; then st OK "snap available"; else st INFO "snap missing (will try install)"; warn_ok=0; fi
 
-    local free_mb; free_mb=$(awk '/MemAvailable|MemFree/{print $2; exit}' /proc/meminfo 2>/dev/null)
-    if [ -n "$free_mb" ] && [ "$free_mb" -lt 500000 ] 2>/dev/null; then
+    local free_mb; free_mb=$(awk '/^MemAvailable:/{print $2; exit}' /proc/meminfo 2>/dev/null)
+    [ -z "$free_mb" ] && free_mb=$(awk '/^MemFree:/{print $2; exit}' /proc/meminfo 2>/dev/null)
+    if [ -n "$free_mb" ] && [ "$free_mb" -lt 900000 ] 2>/dev/null; then
         st WARN "Low RAM (~$((free_mb/1024))MB free) — 1GB+ recommended"
         warn_ok=0
     fi
@@ -148,6 +149,7 @@ install_hvm() {
     sleep 2
 
     st WAIT "Installing LXD via snap..."
+    run_live "snap-seed" snap wait system seed.loaded --timeout=120 || true
     if run_live "snap-lxd" snap install lxd; then
         st OK "LXD installed"
     else
@@ -197,10 +199,11 @@ install_hvm() {
 
     st WAIT "Initializing LXD..."
     if command -v lxd >/dev/null 2>&1; then
-        if ! lxd init --auto >/dev/null 2>&1; then
-            lxd init >/dev/null 2>&1 || st WARN "LXD init skipped (may already be initialized)"
+        if lxd init --auto >/dev/null 2>&1; then
+            st OK "LXD ready"
+        else
+            st WARN "LXD init skipped (already initialized or failed)"
         fi
-        st OK "LXD ready"
     else
         st WARN "lxd binary not found"
     fi
@@ -362,8 +365,11 @@ view_logs() {
 
 setup_domain() {
     show_header
-    read -rp "  Enter domain: " DOMAIN
+    read -rp "  Enter domain: " DOMAIN || DOMAIN=""
     [ -z "$DOMAIN" ] && { st ERR "Empty domain"; pause; return; }
+    st WAIT "Installing nginx + certbot..."
+    install_steps "Web stack" nginx certbot python3-certbot-nginx || { st ERR "Install failed."; pause; return; }
+    echo ""
     cat > /etc/nginx/sites-available/hvm.conf <<EOF
 server {
     listen 80;
@@ -382,7 +388,9 @@ server {
 EOF
     ln -sf /etc/nginx/sites-available/hvm.conf /etc/nginx/sites-enabled/hvm.conf
     nginx -t >/dev/null 2>&1 && systemctl reload nginx
-    st OK "Domain set: http://$DOMAIN → :5000"
+    st WAIT "Requesting SSL certificate..."
+    run_live "certbot" certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email || st ERR "Certbot failed (DNS not pointing?)."
+    st OK "Domain set: https://$DOMAIN → :5000"
     pause
 }
 
@@ -416,7 +424,7 @@ while true; do
     echo -e "     ${R}[0]${NC} Back"
     echo -e "  ${DG}────────────────────────────────────────────────────────────────${NC}"
     echo -ne "  ${C}➜${NC} ${W}Enter Option${NC} ${DG}(0-8):${NC} "
-    read -r choice
+    read -r choice || exit 0
     case $choice in
         1) install_hvm ;;
         2) start_service ;;

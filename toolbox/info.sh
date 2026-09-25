@@ -75,7 +75,7 @@ menu_sys() {
         echo -e "     ${R}[0]${NC} Back"
         echo -e "  ${DG}────────────────────────────────────────────────────────────────${NC}"
         echo -ne "  ${C}➜${NC} ${W}Select Tool${NC} ${DG}(0-20):${NC} "
-        read -r opt
+        read -r opt || exit 0
         case $opt in
             1) cat /etc/*release 2>/dev/null ;;
             2) uname -a ;;
@@ -122,7 +122,7 @@ menu_net() {
         echo -e "     ${R}[0]${NC} Back"
         echo -e "  ${DG}────────────────────────────────────────────────────────────────${NC}"
         echo -ne "  ${C}➜${NC} ${W}Select Tool${NC} ${DG}(0/21-40):${NC} "
-        read -r opt
+        read -r opt || exit 0
         case $opt in
             21) ip a 2>/dev/null || ifconfig ;;
             22) curl -s --max-time 5 ifconfig.me; echo "" ;;
@@ -169,7 +169,7 @@ menu_sec() {
         echo -e "     ${R}[0]${NC} Back"
         echo -e "  ${DG}────────────────────────────────────────────────────────────────${NC}"
         echo -ne "  ${C}➜${NC} ${W}Select Tool${NC} ${DG}(0/41-60):${NC} "
-        read -r opt
+        read -r opt || exit 0
         case $opt in
             41) sudo ufw status 2>/dev/null || sudo firewall-cmd --state 2>/dev/null || echo "No firewall found" ;;
             42) sudo fail2ban-client status 2>/dev/null || echo "Fail2ban not found" ;;
@@ -216,7 +216,7 @@ menu_maint() {
         echo -e "     ${R}[0]${NC} Back"
         echo -e "  ${DG}────────────────────────────────────────────────────────────────${NC}"
         echo -ne "  ${C}➜${NC} ${W}Select Tool${NC} ${DG}(0/61-80):${NC} "
-        read -r opt
+        read -r opt || exit 0
         case $opt in
             61) sudo apt update 2>/dev/null || sudo yum check-update 2>/dev/null ;;
             62) sudo apt upgrade -y 2>/dev/null || sudo yum update -y 2>/dev/null ;;
@@ -263,7 +263,7 @@ menu_web() {
         echo -e "     ${R}[0]${NC} Back"
         echo -e "  ${DG}────────────────────────────────────────────────────────────────${NC}"
         echo -ne "  ${C}➜${NC} ${W}Select Tool${NC} ${DG}(0/81-100):${NC} "
-        read -r opt
+        read -r opt || exit 0
         case $opt in
             81) docker --version 2>/dev/null || echo "Docker not installed" ;;
             82) docker ps -a 2>/dev/null || echo "Docker not installed" ;;
@@ -305,7 +305,7 @@ while true; do
     echo -e "     ${R}[0]${NC} Back"
     echo -e "  ${DG}────────────────────────────────────────────────────────────────${NC}"
     echo -ne "  ${C}➜${NC} ${W}Enter Module${NC} ${DG}(0-5):${NC} "
-    read -r main_opt
+    read -r main_opt || exit 0
     case $main_opt in
         1) menu_sys ;;
         2) menu_net ;;

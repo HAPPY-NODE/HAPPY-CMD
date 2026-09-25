@@ -148,7 +148,7 @@ while true; do
     echo -e "     ${R}[0]${NC} Back"
     echo -e "  ${DG}────────────────────────────────────────────────────────────────${NC}"
     echo -ne "  ${C}➜${NC} ${W}Enter Option${NC} ${DG}(0-5):${NC} "
-    read -r bp
+    read -r bp || exit 0
     case $bp in
         1)
             if ! command -v blueprint >/dev/null 2>&1; then do_install; else do_reinstall; fi ;;

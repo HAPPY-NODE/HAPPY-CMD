@@ -140,7 +140,7 @@ while true; do
     echo -e "     ${R}[0]${NC} Back"
     echo -e "  ${DG}────────────────────────────────────────────────────────────────${NC}"
     echo -ne "  ${C}➜${NC} ${W}Enter Option${NC} ${DG}(0-3):${NC} "
-    read -r hy
+    read -r hy || exit 0
     case $hy in
         1) do_install ;;
         2) do_info ;;

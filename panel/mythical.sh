@@ -46,12 +46,15 @@ install_myth() {
     sleep 0.5
     if ! run_dl "MythicalDash installer" "https://raw.githubusercontent.com/MythicalLTD/MythicalDash/refs/heads/v3-remastered/installer/install.sh" /tmp/mythical_install.sh; then
         st ERR "Download failed."
-    else
-        st INFO "Official Docker installer — auto-installs Docker + panel"
-        bash /tmp/mythical_install.sh || st ERR "Install failed."
-        st INFO "After install: reboot, then 'mythicaldash pterodactyl configure'"
+        pause; return
     fi
-    st OK "Installation complete."
+    st INFO "Official Docker installer — auto-installs Docker + panel"
+    if bash /tmp/mythical_install.sh; then
+        st OK "Installation complete."
+        st INFO "After install: reboot, then 'mythicaldash pterodactyl configure'"
+    else
+        st ERR "Install failed."
+    fi
     pause
 }
 
@@ -63,14 +66,15 @@ update_myth() {
     fi
     st WAIT "Updating to latest..."
     cd /var/www/mythicaldash || return
-    run_dl "MythicalDash.zip" "https://github.com/MythicalLTD/MythicalDash/releases/download/3.2.3/MythicalDash.zip" MythicalDash.zip || { st ERR "Download failed"; pause; return; }
-    run_live "unzip" unzip -o MythicalDash.zip -d /var/www/mythicaldash
-    dos2unix arch.bash 2>/dev/null
-    sudo bash arch.bash
-    run_live "composer" composer install --no-dev --optimize-autoloader
-    ./MythicalDash -migrate
-    chown -R www-data:www-data /var/www/mythicaldash/*
-    st OK "Updated to v3.2.3."
+    run_dl "MythicalDash.zip" "https://github.com/MythicalLTD/MythicalDash/releases/latest/download/MythicalDash.zip" MythicalDash.zip || { st ERR "Download failed"; pause; return; }
+    run_live "unzip" unzip -o MythicalDash.zip -d /var/www/mythicaldash || { st ERR "Extract failed."; pause; return; }
+    rm -f MythicalDash.zip
+    dos2unix arch.bash 2>/dev/null || true
+    bash arch.bash || st ERR "arch.bash failed."
+    run_live "composer" composer install --no-dev --optimize-autoloader || st ERR "composer install failed."
+    ./MythicalDash -migrate || st ERR "migrate failed."
+    chown -R www-data:www-data /var/www/mythicaldash/* 2>/dev/null || true
+    st OK "Updated."
     pause
 }
 
@@ -80,7 +84,7 @@ uninstall_myth() {
     read -rp "  Proceed? (y/N): " conf
     [[ "$conf" =~ ^[Yy]$ ]] || { st INFO "Cancelled."; pause; return; }
     st WAIT "Removing database..."
-    mariadb -u root -p <<EOF 2>/dev/null
+    (mariadb -u root 2>/dev/null || mysql -u root 2>/dev/null) <<EOF
 DROP DATABASE IF EXISTS mythicaldash;
 DROP USER IF EXISTS 'mythicaldash'@'127.0.0.1';
 FLUSH PRIVILEGES;
@@ -88,7 +92,7 @@ EOF
     st WAIT "Removing files..."
     rm -rf /var/www/mythicaldash
     st WAIT "Cleaning cron..."
-    sudo crontab -l 2>/dev/null | grep -v 'mythicaldash' | sudo crontab - 2>/dev/null
+    crontab -l 2>/dev/null | grep -v 'mythicaldash' | crontab - 2>/dev/null
     st WAIT "Cleaning nginx..."
     rm -f /etc/nginx/sites-{available,enabled}/MythicalDash.conf 2>/dev/null
     systemctl restart nginx 2>/dev/null
@@ -105,7 +109,7 @@ while true; do
     echo -e "     ${R}[0]${NC} Back"
     echo -e "  ${DG}────────────────────────────────────────────────────────────────${NC}"
     echo -ne "  ${C}➜${NC} ${W}Enter Option${NC} ${DG}(0-3):${NC} "
-    read -r choice
+    read -r choice || exit 0
     case $choice in
         1) install_myth ;;
         2) update_myth ;;

@@ -56,7 +56,9 @@ pp_status() {
 }
 
 pp_version() {
-    pufferpanel version 2>/dev/null | head -1 | tr -d 'v' || echo "unknown"
+    local v
+    v="$(pufferpanel version 2>/dev/null | head -1 | tr -d 'v')"
+    echo "${v:-unknown}"
 }
 
 # ---------- Header ----------
@@ -102,23 +104,47 @@ install_pp() {
     echo ""
     st OK "Installation complete. ($(pp_version))"
     echo -e "  ${SL}Panel:${NC} ${W}http://<your-ip>:8080${NC}"
-    read -rp "  Create admin user now? (y/N): " conf
+    read -rp "  Create admin user now? (y/N): " conf || conf=""
     if [[ "$conf" =~ ^[Yy]$ ]]; then
-        echo -e "  ${SL}Answer ${W}Y${SL} when asked if admin${NC}"
-        pufferpanel user add || st ERR "User creation skipped."
+        pp_add_user
     fi
     pause
 }
 
 # ---------- Admin user ----------
+# PufferPanel ka survey prompt kuch terminals (TERM/tty) me input nahi leta —
+# isliye plain bash prompts + CLI flags: survey bilkul run hi nahi hota.
+pp_add_user() {
+    local u e p adm flags
+    read -rp "  Username: " u || { st ERR "No input."; return 1; }
+    [ -n "$u" ] || { st ERR "Username required."; return 1; }
+    read -rp "  Email: " e || { st ERR "No input."; return 1; }
+    [ -n "$e" ] || { st ERR "Email required."; return 1; }
+    read -rsp "  Password: " p; echo ""
+    [ -n "$p" ] || { st ERR "Password required."; return 1; }
+    read -rp "  Make admin? (Y/n): " adm || adm=""
+    flags=(--name "$u" --email "$e" --password "$p")
+    [[ "$adm" =~ ^[Nn]$ ]] || flags+=(--admin)
+    if pufferpanel user add "${flags[@]}"; then
+        if [[ "$adm" =~ ^[Nn]$ ]]; then
+            st OK "User created: $u"
+        else
+            st OK "Admin created: $u"
+        fi
+    else
+        st ERR "User creation failed."
+        return 1
+    fi
+}
+
 create_user() {
     show_header
     if ! command -v pufferpanel >/dev/null 2>&1; then
         st ERR "PufferPanel not installed. Use [1] first."
         pause; return
     fi
-    st INFO "Adding user (answer Y for admin)..."
-    pufferpanel user add || st ERR "User creation failed."
+    st INFO "Adding user (non-interactive, admin by default)..."
+    pp_add_user
     pause
 }
 
@@ -134,7 +160,7 @@ service_menu() {
         echo -e "     ${R}[0]${NC} Back"
         echo -e "  ${DG}────────────────────────────────────────────────────────────────${NC}"
         echo -ne "  ${C}➜${NC} ${W}Enter Option${NC} ${DG}(0-4):${NC} "
-        read -r c
+        read -r c || return
         case $c in
             1) run_live "systemd-start" systemctl start pufferpanel; pause ;;
             2) run_live "systemd-stop" systemctl stop pufferpanel; pause ;;
@@ -192,8 +218,10 @@ EOF
     if [ -f "$cfg" ]; then
         if grep -q '"host"' "$cfg"; then
             sed -i 's|"host": *"[^"]*"|"host": "127.0.0.1:8080"|' "$cfg"
+            run_live "pufferpanel-restart" systemctl restart pufferpanel || true
+        else
+            st WARN "No \"host\" key in $cfg — set it to 127.0.0.1:8080 manually"
         fi
-        run_live "pufferpanel-restart" systemctl restart pufferpanel || true
     else
         st ERR "Config not found: $cfg"
     fi
@@ -254,7 +282,7 @@ while true; do
     echo -e "     ${R}[0]${NC} Back"
     echo -e "  ${DG}────────────────────────────────────────────────────────────────${NC}"
     echo -ne "  ${C}➜${NC} ${W}Enter Option${NC} ${DG}(0-6):${NC} "
-    read -r choice
+    read -r choice || exit 0
     case $choice in
         1) install_pp ;;
         2) create_user ;;

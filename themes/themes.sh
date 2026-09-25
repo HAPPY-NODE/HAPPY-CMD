@@ -142,7 +142,7 @@ while true; do
         echo ""
     fi
     show_menu
-    read -r opt
+    read -r opt || exit 0
     case $opt in
         1) run_card "Blueprint" "themes/blueprint.sh" ;;
         2) run_card "Theme Library" "themes/manager.sh" ;;
