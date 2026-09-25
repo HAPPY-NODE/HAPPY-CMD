@@ -107,12 +107,12 @@ show_menu() {
     if [ "$width" -ge 86 ]; then
         echo -e "     $(mk_cell 1 'VPS Setup' "$M1")$(mk_cell 2 'Panel Manager' "$M2")$(mk_cell 3 'Wings Manager' "$M3")"
         echo -e "     $(mk_cell 4 'Toolbox' "$M4")$(mk_cell 5 'Themes' "$M5")$(mk_cell 6 'Discord VPS Bot' "$M6")"
-        echo -e "     $(mk_cell 7 'Backup' "$M7")$(mk_cell 8 'Utilities' "$M8")"
+        echo -e "     $(mk_cell 7 'Extra' "$M7")$(mk_cell 8 'Utilities' "$M8")"
     elif [ "$width" -ge 66 ]; then
         echo -e "     $(mk_cell 1 'VPS Setup' "$M1" 30)$(mk_cell 2 'Panel Manager' "$M2" 30)"
         echo -e "     $(mk_cell 3 'Wings Manager' "$M3" 30)$(mk_cell 4 'Toolbox' "$M4" 30)"
         echo -e "     $(mk_cell 5 'Themes' "$M5" 30)$(mk_cell 6 'Discord VPS Bot' "$M6" 30)"
-        echo -e "     $(mk_cell 7 'Backup' "$M7" 30)$(mk_cell 8 'Utilities' "$M8" 30)"
+        echo -e "     $(mk_cell 7 'Extra' "$M7" 30)$(mk_cell 8 'Utilities' "$M8" 30)"
     else
         echo -e "     ${FW}[1]${NC} ${M1}VPS Setup${NC}"
         echo -e "     ${FW}[2]${NC} ${M2}Panel Manager${NC}"
@@ -120,7 +120,7 @@ show_menu() {
         echo -e "     ${FW}[4]${NC} ${M4}Toolbox${NC}"
         echo -e "     ${FW}[5]${NC} ${M5}Themes${NC}"
         echo -e "     ${FW}[6]${NC} ${M6}Discord VPS Bot${NC}"
-        echo -e "     ${FW}[7]${NC} ${M7}Backup${NC}"
+        echo -e "     ${FW}[7]${NC} ${M7}Extra${NC}"
         echo -e "     ${FW}[8]${NC} ${M8}Utilities${NC}"
     fi
     echo ""
@@ -154,7 +154,7 @@ handle_choice() {
         4) section_enter "Toolbox"; hn_run "toolbox/toolbox.sh" ;;
         5) section_enter "Themes"; hn_run "themes/themes.sh" ;;
         6) section_enter "Discord VPS Bot"; hn_run "bots/bots.sh" ;;
-        7) section_enter "Backup"; echo "   ${TE}Backup${NC} ${SL}- coming soon${NC}"; sleep 1 ;;
+        7) section_enter "Extra"; echo "   ${TE}Extra${NC} ${SL}- coming soon${NC}"; sleep 1 ;;
         8) section_enter "Utilities"; echo "   ${FB}Utilities${NC} ${SL}- coming soon${NC}"; sleep 1 ;;
         0)
             clear

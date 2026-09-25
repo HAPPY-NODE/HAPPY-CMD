@@ -29,7 +29,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/HAPPY-NODE/HAPPY-CMD/main/me
 | 4 | **Toolbox** | Root tools, VPN (Tailscale/ZeroTier/Cloudflare), sysinfo, web terminal |
 | 5 | **Themes** | Blueprint, themes & extensions, ARIX, Hyper |
 | 6 | **Discord VPS Bot** | Docker / LXC / SSHX bot installers (token → admin → env) |
-| 7 | **Backup** | Full / DB / incremental backup & restore, cron |
+| 7 | **Extra** | Coming soon |
 | 8 | **Utilities** | File organizer, logs, cron, SSL, ports |
 
 ## Highlights
