@@ -168,6 +168,11 @@ install_akvm() {
     st INFO "Domain: $DOMAIN  →  http://$DOMAIN:$PANEL_PORT"
     echo ""
 
+    # purani failed run apt ko broken state me chhod sakti hai — pehle repair
+    st WAIT "Repairing apt state (if a previous install failed)..."
+    run_live "dpkg-configure" dpkg --configure -a || true
+    run_live "apt-fix" env DEBIAN_FRONTEND=noninteractive apt-get -f install -y || true
+
     st WAIT "Updating packages..."
     run_live "apt-update" apt-get update -y -q || { st ERR "apt update failed"; pause; return; }
 

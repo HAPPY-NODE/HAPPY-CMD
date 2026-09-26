@@ -31,7 +31,15 @@ node_ok() {
 }
 
 ensure_node() {
-    if node_ok; then st OK "Node $(node -v)"; return 0; fi
+    if node_ok; then
+        st OK "Node $(node -v)"
+        if ! command -v npm >/dev/null 2>&1; then
+            st WAIT "npm missing — installing..."
+            run_live "apt-npm" env DEBIAN_FRONTEND=noninteractive apt-get install -y npm || true
+        fi
+        if command -v npm >/dev/null 2>&1; then st OK "npm ready"; else st WARN "npm missing — needed only if node_modules incomplete"; fi
+        return 0
+    fi
     if command -v node >/dev/null 2>&1; then
         st WARN "Node $(node -v 2>/dev/null) too old — panel needs Node ≥16"
     else
@@ -48,12 +56,17 @@ ensure_node() {
         # pehla try fail (conflict/half-config state) → clean karke retry
         st INFO "Cleaning conflicting distro packages (libnode-dev)..."
         run_live "dpkg-fix" dpkg --configure -a || true
-        run_live "apt-node-rm" env DEBIAN_FRONTEND=noninteractive apt-get remove -y libnode-dev nodejs || true
+        run_live "apt-node-rm" env DEBIAN_FRONTEND=noninteractive apt-get remove -y libnode-dev nodejs npm node-nopt node-tar node-which || true
         run_live "apt-node20-retry" env DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::="--force-overwrite" install -y nodejs || true
     fi
-    if node_ok; then st OK "Node $(node -v) ready"; return 0; fi
+    if node_ok; then
+        st OK "Node $(node -v) ready"
+        if command -v npm >/dev/null 2>&1; then st OK "npm ready"; else st WARN "npm missing — rebuild step will be skipped"; fi
+        return 0
+    fi
     st ERR "Node.js ≥16 could not be installed"
-    st INFO "Manual fix: apt remove -y libnode-dev nodejs && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt install -y nodejs"
+    st INFO "Manual fix: dpkg --configure -a && apt-get -f install -y && apt remove -y libnode-dev nodejs npm"
+    st INFO "then: curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt install -y nodejs"
     st INFO "Then re-run [1] Install"
     return 1
 }
@@ -218,14 +231,23 @@ install_hkvm() {
     st INFO "Domain: $DOMAIN  →  http://$DOMAIN:$PANEL_PORT"
     echo ""
 
+    # purani failed run apt ko broken state me chhod sakti hai (held packages) — pehle repair
+    st WAIT "Repairing apt state (if a previous install failed)..."
+    run_live "dpkg-configure" dpkg --configure -a || true
+    run_live "apt-fix" env DEBIAN_FRONTEND=noninteractive apt-get -f install -y || true
+
     st WAIT "Updating packages..."
     run_live "apt-update" apt-get update -y -q || { st ERR "apt update failed"; pause; return; }
 
-    st WAIT "Installing dependencies (node, npm, qemu, unzip, nginx)..."
-    if ! run_live "apt-install" env DEBIAN_FRONTEND=noninteractive apt-get install -y unzip curl ca-certificates nginx nodejs npm qemu-system-x86 qemu-utils; then
-        run_live "apt-fix" env DEBIAN_FRONTEND=noninteractive apt-get install -y --fix-broken unzip curl nodejs npm nginx qemu-system-x86 || {
+    # nodejs/npm yahan MAKSUD se NAHI — distro npm ke node-* deps nodesource se tangle hote hain.
+    # Node 20 (NodeSource) ke saath npm bundled aata hai; ensure_node ye handle karta hai
+    st WAIT "Installing dependencies (qemu, unzip, nginx)..."
+    if ! run_live "apt-install" env DEBIAN_FRONTEND=noninteractive apt-get install -y unzip curl ca-certificates nginx qemu-system-x86 qemu-utils; then
+        run_live "apt-fix2" env DEBIAN_FRONTEND=noninteractive apt-get -f install -y || true
+        run_live "apt-retry" env DEBIAN_FRONTEND=noninteractive apt-get install -y --fix-broken unzip curl nginx qemu-system-x86 || {
             st ERR "Package install failed"
-            st INFO "Try: apt install nodejs npm qemu-system-x86 unzip nginx"
+            st INFO "Try: dpkg --configure -a && apt-get -f install -y"
+            st INFO "then re-run [1] Install"
             pause; return
         }
     fi
@@ -272,10 +294,22 @@ install_hkvm() {
     if [ -d /root/hkvm/hkvm/node_modules ] && [ -n "$(ls -A /root/hkvm/hkvm/node_modules 2>/dev/null)" ]; then
         st OK "node_modules present"
         # node version badla ho to native sqlite3 rebuild karo (ABI match)
-        if ! (cd /root/hkvm/hkvm && run_live "npm-rebuild" npm rebuild sqlite3); then
+        if ! command -v npm >/dev/null 2>&1; then
+            st WARN "npm missing — skipping rebuild (require check will verify bundled modules)"
+        elif ! (cd /root/hkvm/hkvm && run_live "npm-rebuild" npm rebuild sqlite3); then
             st WARN "npm rebuild sqlite3 failed — next check will decide"
         fi
     else
+        if ! command -v npm >/dev/null 2>&1; then
+            st WAIT "npm missing — installing..."
+            run_live "apt-npm" env DEBIAN_FRONTEND=noninteractive apt-get install -y npm || true
+        fi
+        if ! command -v npm >/dev/null 2>&1; then
+            st ERR "npm required (node_modules empty) but not installable"
+            st INFO "Try: dpkg --configure -a && apt-get -f install -y && apt install -y npm"
+            st INFO "then re-run [1] Install"
+            pause; return 1
+        fi
         st WAIT "npm install..."
         if ! (cd /root/hkvm/hkvm && run_live "npm" npm install --omit=dev --no-audit --no-fund); then
             st ERR "npm install failed — see error above"
