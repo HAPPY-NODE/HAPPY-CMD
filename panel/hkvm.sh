@@ -30,6 +30,11 @@ node_ok() {
     [ -n "$mj" ] && [ "$mj" -ge 16 ] 2>/dev/null
 }
 
+# sqlite3 + express isi Node par load ho paye — warna service crash-loop
+hkvm_modules_ok() {
+    (cd /root/hkvm/hkvm && node -e "require('/root/hkvm/hkvm/node_modules/sqlite3');require('/root/hkvm/hkvm/node_modules/express')") 2>&1
+}
+
 ensure_node() {
     if node_ok; then
         st OK "Node $(node -v)"
@@ -293,12 +298,6 @@ install_hkvm() {
 
     if [ -d /root/hkvm/hkvm/node_modules ] && [ -n "$(ls -A /root/hkvm/hkvm/node_modules 2>/dev/null)" ]; then
         st OK "node_modules present"
-        # node version badla ho to native sqlite3 rebuild karo (ABI match)
-        if ! command -v npm >/dev/null 2>&1; then
-            st WARN "npm missing — skipping rebuild (require check will verify bundled modules)"
-        elif ! (cd /root/hkvm/hkvm && run_live "npm-rebuild" npm rebuild sqlite3); then
-            st WARN "npm rebuild sqlite3 failed — next check will decide"
-        fi
     else
         if ! command -v npm >/dev/null 2>&1; then
             st WAIT "npm missing — installing..."
@@ -310,8 +309,10 @@ install_hkvm() {
             st INFO "then re-run [1] Install"
             pause; return 1
         fi
+        # gyp fallback ke liye toolchain pehle se ready (prebuild download fail ho to compile ho sake)
+        run_live "apt-buildtools" env DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential python3 pkg-config || true
         st WAIT "npm install..."
-        if ! (cd /root/hkvm/hkvm && run_live "npm" npm install --omit=dev --no-audit --no-fund); then
+        if ! (cd /root/hkvm/hkvm && run_live "npm" npm install --omit=dev --no-audit --no-fund --no-update-notifier); then
             st ERR "npm install failed — see error above"
             st INFO "Retry: cd /root/hkvm/hkvm && npm install --omit=dev"
             st INFO "then re-run [1] Install from this menu"
@@ -325,14 +326,28 @@ install_hkvm() {
         st OK "npm deps installed"
     fi
 
-    # final gate: native module isi Node par load ho sake — warna service crash-loop
+    # native gate PEHLE, rebuild SIRF fallback.
+    # sqlite3 5.1.7 ka bundled NAPI binding kisi bhi Node par chalta hai —
+    # andha rebuild usko wipe kar deta tha (prebuild fail → node-gyp clean → toolchain missing → binding gaya)
     if [ "${HN_SKIP_NATIVE_CHECK:-0}" != 1 ]; then
+        local g_out
         st WAIT "Checking native modules (sqlite3)..."
-        if ! (cd /root/hkvm/hkvm && node -e "require('/root/hkvm/hkvm/node_modules/sqlite3');require('/root/hkvm/hkvm/node_modules/express')"); then
-            st ERR "Modules broken for Node $(node -v 2>/dev/null) — panel would crash"
-            st INFO "Fix: cd /root/hkvm/hkvm && rm -rf node_modules && npm install --omit=dev"
-            st INFO "Then re-run [1] Install"
-            pause; return 1
+        if ! g_out="$(hkvm_modules_ok)"; then
+            st WARN "Bundled binding not loading for Node $(node -v 2>/dev/null) — installing build tools + rebuilding"
+            run_live "apt-buildtools" env DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential python3 pkg-config || true
+            if command -v npm >/dev/null 2>&1; then
+                run_live "npm-rebuild" npm rebuild sqlite3 --no-audit --no-fund --no-update-notifier --loglevel=error || st WARN "npm rebuild failed — final check next"
+            else
+                st WARN "npm missing — cannot rebuild"
+            fi
+            if ! g_out="$(hkvm_modules_ok)"; then
+                st ERR "Modules broken for Node $(node -v 2>/dev/null) — panel would crash"
+                printf '%s\n' "$g_out" | head -10 | sed 's/^/  /'
+                st INFO "Fix: apt install -y build-essential && cd /root/hkvm/hkvm && npm rebuild sqlite3"
+                st INFO "Or full: cd /root/hkvm/hkvm && rm -rf node_modules && npm install --omit=dev"
+                st INFO "Then re-run [1] Install"
+                pause; return 1
+            fi
         fi
         st OK "Native modules OK"
     fi

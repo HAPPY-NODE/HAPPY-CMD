@@ -128,7 +128,7 @@ run_live() {
     if [ "$rc" -ne 0 ] && [ -s "$log" ]; then
         while IFS= read -r l; do
             printf "  \033[1;91m│\033[0m %s\n" "$l"
-        done < <(tail -n 6 "$log" 2>/dev/null)
+        done < <(tail -n 10 "$log" 2>/dev/null)
     fi
     rm -f "$log"
     return $rc
