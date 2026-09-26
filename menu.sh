@@ -223,12 +223,6 @@ boot_splash() {
     done
     printf "\r\033[K"
 
-    # 5. module checks
-    local mods=("colors" "banner" "menu" "sections" "ready")
-    for line in "${mods[@]}"; do
-        printf "  ${GR}✓${NC} ${CB}%s${NC}\n" "$line"
-        sleep 0.06
-    done
     sleep 0.15
     clear
 }
