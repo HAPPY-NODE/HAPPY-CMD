@@ -91,12 +91,13 @@ panel_status() {
 svc_disp() {
     # $1=unit  $2=pgrep-pattern  $3=install-dir
     local _st _nr
-    if [ -f "/etc/systemd/system/$1" ]; then
-        _st="$(systemctl is-active "$1" 2>/dev/null || true)"
+    # systemd absent (container/LXC) = systemctl chup-chaap noise chhodta hai — skip karo
+    if [ -f "/etc/systemd/system/$1" ] && [ -d /run/systemd/system ]; then
+        _st="$(systemctl is-active "$1" 2>/dev/null | grep -m1 -E '^(active|activating|reloading|failed|inactive|dead|static|masked|waiting|maintenance)' || true)"
         case "$_st" in
             active) echo "RUNNING" ;;
             activating*|reloading*)
-                _nr="$(systemctl show -p NRestarts --value "$1" 2>/dev/null || echo 0)"
+                _nr="$(systemctl show -p NRestarts --value "$1" 2>/dev/null | grep -m1 -E '^[0-9]+' || echo 0)"
                 if [ "${_nr:-0}" -gt 0 ] 2>/dev/null; then echo "CRASH-LOOP"; else echo "STARTING"; fi ;;
             failed) echo "FAILED" ;;
             *)
@@ -148,7 +149,10 @@ akvm_status() {
 }
 
 pp_status() {
-    if systemctl is-active --quiet pufferpanel 2>/dev/null; then
+    # container me systemd nahi — systemctl ka "not running" noise stdout+stderr dono band
+    if [ -d /run/systemd/system ] && systemctl is-active --quiet pufferpanel >/dev/null 2>&1; then
+        echo -e "${G}● RUNNING${NC}"
+    elif pgrep -f "pufferpanel" >/dev/null 2>&1; then
         echo -e "${G}● RUNNING${NC}"
     elif command -v pufferpanel >/dev/null 2>&1; then
         echo -e "${Y}● INSTALLED${NC}"
@@ -195,7 +199,7 @@ show_header() {
     echo -e "     ${GR}[7]${NC} ${GR}ᴘᴀʏᴍᴇɴᴛᴇʀ${NC}        ${DG}•${NC} $(panel_status /var/www/paymenter)"
     echo -e "     ${GR}[8]${NC} ${GR}ᴄᴏɴᴠᴏʏ${NC}           ${DG}•${NC} $(panel_status /var/www/convoy)"
     echo -e "     ${GR}[9]${NC} ${GR}ᴍʏᴛʜɪᴄᴀʟᴅᴀꜱʜ${NC}    ${DG}•${NC} $(panel_status /var/www/mythicaldash)"
-    echo -e "     ${GR}[10]${NC} ${GR}PufferPanel${NC}      ${DG}•${NC} $(pp_status)"
+    echo -e "     ${GR}[10]${NC} ${GR}ᴘᴜꜰꜰᴇʀᴘᴀɴᴇʟ${NC}      ${DG}•${NC} $(pp_status)"
     echo -e "     ${GR}[11]${NC} ${GR}ᴊᴛɢ ᴘᴀɴᴇʟ${NC}         ${DG}•${NC} $(jtg_status)"
     echo -e "     ${GR}[12]${NC} ${GR}ɴᴏᴠᴀ ꜱᴛᴜᴅɪᴏ${NC}       ${DG}•${NC} $(nova_status)"
     echo -e "     ${FR}[0]${NC} ${FR}ʙᴀᴄᴋ${NC}"
