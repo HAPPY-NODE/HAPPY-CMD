@@ -157,6 +157,16 @@ pp_status() {
     fi
 }
 
+jtg_status() {
+    if curl -s -m 3 "http://127.0.0.1:6767/api/health" 2>/dev/null | grep -qi "jtg"; then
+        echo -e "${G}● RUNNING${NC}"
+    elif [ -f "/root/Jtg/package.json" ] || [ -f "$HOME/Jtg/package.json" ]; then
+        echo -e "${Y}● INSTALLED (stopped)${NC}"
+    else
+        echo -e "${R}● NOT INSTALLED${NC}"
+    fi
+}
+
 # ---------- Header ----------
 show_header() {
     clear
@@ -175,9 +185,10 @@ show_header() {
     echo -e "     ${GR}[8]${NC} ${GR}ᴄᴏɴᴠᴏʏ${NC}           ${DG}•${NC} $(panel_status /var/www/convoy)"
     echo -e "     ${GR}[9]${NC} ${GR}ᴍʏᴛʜɪᴄᴀʟᴅᴀꜱʜ${NC}    ${DG}•${NC} $(panel_status /var/www/mythicaldash)"
     echo -e "     ${GR}[10]${NC} ${GR}PufferPanel${NC}      ${DG}•${NC} $(pp_status)"
+    echo -e "     ${GR}[11]${NC} ${GR}ᴊᴛɢ ᴘᴀɴᴇʟ${NC}         ${DG}•${NC} $(jtg_status)"
     echo -e "     ${FR}[0]${NC} ${FR}ʙᴀᴄᴋ${NC}"
     echo -e "  ${GY}────────────────────────────────────────────────────────────────${NC}"
-    echo -ne "  ${FC}➜${NC} ${FW}Enter Option${NC} ${SL}(0-10):${NC} "
+    echo -ne "  ${FC}➜${NC} ${FW}Enter Option${NC} ${SL}(0-11):${NC} "
 }
 
 # ---------- Run panel script ----------
@@ -204,6 +215,7 @@ while true; do
         8) run_panel "Convoy" "panel/convoy.sh" ;;
         9) run_panel "MythicalDash" "panel/mythical.sh" ;;
         10) run_panel "PufferPanel" "panel/pufferpanel.sh" ;;
+        11) run_panel "JTG Panel" "panel/jtg.sh" ;;
         0) dots_load "Returning" 2; exit 0 ;;
         *) echo -e "  ${R}✗ Invalid option${NC}"; sleep 0.8 ;;
     esac
