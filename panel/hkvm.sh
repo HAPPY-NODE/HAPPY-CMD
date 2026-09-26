@@ -251,10 +251,10 @@ install_hkvm() {
 
     # nodejs/npm yahan MAKSUD se NAHI — distro npm ke node-* deps nodesource se tangle hote hain.
     # Node 20 (NodeSource) ke saath npm bundled aata hai; ensure_node ye handle karta hai
-    st WAIT "Installing dependencies (qemu, unzip, nginx)..."
-    if ! run_live "apt-install" env DEBIAN_FRONTEND=noninteractive apt-get install -y unzip curl ca-certificates nginx qemu-system-x86 qemu-utils; then
+    st WAIT "Installing dependencies (qemu, unzip, nginx, genisoimage)..."
+    if ! run_live "apt-install" env DEBIAN_FRONTEND=noninteractive apt-get install -y unzip curl ca-certificates nginx qemu-system-x86 qemu-utils genisoimage; then
         run_live "apt-fix2" env DEBIAN_FRONTEND=noninteractive apt-get -f install -y || true
-        run_live "apt-retry" env DEBIAN_FRONTEND=noninteractive apt-get install -y --fix-broken unzip curl nginx qemu-system-x86 || {
+        run_live "apt-retry" env DEBIAN_FRONTEND=noninteractive apt-get install -y --fix-broken unzip curl nginx qemu-system-x86 genisoimage || {
             st ERR "Package install failed"
             st INFO "Try: dpkg --configure -a && apt-get -f install -y"
             st INFO "then re-run [1] Install"
@@ -263,6 +263,11 @@ install_hkvm() {
     fi
     ensure_node || { pause; return; }
     command -v qemu-system-x86_64 >/dev/null 2>&1 && st OK "QEMU ready" || st WARN "QEMU missing — VM create may fail"
+    if command -v genisoimage >/dev/null 2>&1; then
+        st OK "genisoimage ready"
+    else
+        st INFO "genisoimage missing — built-in seed writer use hoga (VM create phir bhi chalega)"
+    fi
 
     mkdir -p /root/hkvm
     if [ -f "$DIR/hkvm.zip" ]; then
