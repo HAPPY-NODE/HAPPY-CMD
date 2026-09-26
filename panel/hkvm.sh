@@ -225,7 +225,12 @@ install_hkvm() {
     [ -f /etc/systemd/system/hkvm.service ] && _gst="$(systemctl is-active hkvm.service 2>/dev/null || true)"
     if [ -d "/root/hkvm/hkvm" ] && { [ "$_gst" = "active" ] || { [ -z "$_gst" ] && pgrep -f "hkvm/hkvm/app.js|node app.js" >/dev/null 2>&1; }; }; then
         st OK "HKVM Panel already installed & running."
-        pause; return
+        local _re=""
+        read -rp "  Re-install to refresh files & apply latest fixes? [y/N]: " _re
+        case "$_re" in
+            [Yy]*) echo "" ;;
+            *) pause; return ;;
+        esac
     fi
 
     vps_check || { pause; return; }
@@ -383,19 +388,23 @@ RestartSec=3
 User=root
 Environment=PORT=$PANEL_PORT
 Environment=HOST=0.0.0.0
-Environment=PANEL_NAME=HAPPY NODE
+Environment="PANEL_NAME=HAPPY NODE"
 Environment=NODE_ENV=production
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-    st WAIT "Configuring Nginx → domain:$PANEL_PORT..."
-    if [ -n "$DOMAIN" ] && [ "$DOMAIN" != "localhost" ]; then
-        cat > /etc/nginx/sites-available/hkvm.conf <<EOF
+    # hamesha port-80 site likho — domain na ho to bhi bare IP se panel khule
+    st WAIT "Configuring Nginx → port 80 → :$PANEL_PORT..."
+    local NSDOMAIN="$DOMAIN"
+    if [ -z "$NSDOMAIN" ] || [ "$NSDOMAIN" = "localhost" ]; then
+        NSDOMAIN="_"
+    fi
+    cat > /etc/nginx/sites-available/hkvm.conf <<EOF
 server {
     listen 80;
-    server_name $DOMAIN;
+    server_name $NSDOMAIN;
     location / {
         proxy_pass http://127.0.0.1:$PANEL_PORT;
         proxy_set_header Host \$host;
@@ -408,9 +417,16 @@ server {
     }
 }
 EOF
-        ln -sf /etc/nginx/sites-available/hkvm.conf /etc/nginx/sites-enabled/hkvm.conf
-        nginx -t >/dev/null 2>&1 && systemctl reload nginx 2>/dev/null
-        st OK "Nginx: http://$DOMAIN → :$PANEL_PORT"
+    ln -sf /etc/nginx/sites-available/hkvm.conf /etc/nginx/sites-enabled/hkvm.conf
+    if nginx -t >/dev/null 2>&1; then
+        systemctl reload nginx 2>/dev/null || nginx -s reload 2>/dev/null
+        if [ "$NSDOMAIN" = "_" ]; then
+            st OK "Nginx: http://<server-ip> → :$PANEL_PORT (port 80)"
+        else
+            st OK "Nginx: http://$DOMAIN → :$PANEL_PORT"
+        fi
+    else
+        st WARN "Nginx config test failed — port-80 site not applied (purane sites safe)"
     fi
 
     st WAIT "Starting service..."
@@ -443,6 +459,14 @@ EOF
             [ "$DOMAIN" != "localhost" ] && echo -e "  ${W}Nginx:${NC}   http://$DOMAIN"
             echo -e "  ${W}Service:${NC} hkvm.service (active)"
             echo -e "  ${W}Path:${NC}    /root/hkvm/hkvm"
+            local PUBIP
+            PUBIP="$(curl -4 -fsS --max-time 6 https://api.ipify.org 2>/dev/null || true)"
+            [ -n "$PUBIP" ] && echo -e "  ${W}Public:${NC}  http://$PUBIP:$PANEL_PORT   (browser me yahi kholo)"
+            if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
+                ufw allow "$PANEL_PORT/tcp" >/dev/null 2>&1 && st OK "UFW: port $PANEL_PORT open"
+                ufw allow 80/tcp >/dev/null 2>&1
+                ufw allow 443/tcp >/dev/null 2>&1
+            fi
             if ss -ltn 2>/dev/null | grep -q ":$PANEL_PORT "; then
                 st OK "Port $PANEL_PORT listening"
             else
@@ -464,6 +488,14 @@ EOF
         if pgrep -f "hkvm/hkvm/app.js|node app.js" >/dev/null 2>&1; then
             st OK "HKVM Panel running (background mode, no systemd)"
             echo -e "  ${W}URL:${NC}  http://$DOMAIN:$PANEL_PORT"
+            local PUBIP
+            PUBIP="$(curl -4 -fsS --max-time 6 https://api.ipify.org 2>/dev/null || true)"
+            [ -n "$PUBIP" ] && echo -e "  ${W}Public:${NC} http://$PUBIP:$PANEL_PORT   (browser me yahi kholo)"
+            if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
+                ufw allow "$PANEL_PORT/tcp" >/dev/null 2>&1 && st OK "UFW: port $PANEL_PORT open"
+                ufw allow 80/tcp >/dev/null 2>&1
+                ufw allow 443/tcp >/dev/null 2>&1
+            fi
             echo -e "  ${W}Log:${NC}   /var/log/hkvm.log"
             st INFO "Note: auto-start on reboot needs systemd"
             show_creds_box "HKVM" "http://$DOMAIN:$PANEL_PORT"

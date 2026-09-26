@@ -336,8 +336,8 @@ RestartSec=3
 User=root
 Environment=PORT=5000
 Environment=HOST=0.0.0.0
-Environment=PANEL_NAME=HAPPY NODE
-Environment=PANEL_DEVELOPER=HAPPY NODE
+Environment="PANEL_NAME=HAPPY NODE"
+Environment="PANEL_DEVELOPER=HAPPY NODE"
 
 [Install]
 WantedBy=multi-user.target
