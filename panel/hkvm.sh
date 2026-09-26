@@ -280,6 +280,22 @@ install_hkvm() {
         st INFO "Fix: rm -rf /root/hkvm  →  re-run [1] Install"
         pause; return 1
     fi
+    # stale zip guard: app.js me asli create-VM API + naya session store hone chahiye,
+    # warna frontend ko HTML milti thi → "Unexpected token '<'" error
+    if ! grep -q "app.post('/api/vms'" /root/hkvm/hkvm/app.js 2>/dev/null || ! grep -q "FileSessionStore" /root/hkvm/hkvm/app.js 2>/dev/null; then
+        st WARN "Stale/old hkvm.zip detected — re-downloading fresh copy..."
+        rm -f /tmp/hkvm.zip
+        if run_dl "HKVM Panel zip (fresh)" "$HN_BASE_URL/panel/hkvm.zip" /tmp/hkvm.zip \
+           && run_live "unzip-hkvm" unzip -o /tmp/hkvm.zip -d /root/hkvm \
+           && grep -q "FileSessionStore" /root/hkvm/hkvm/app.js 2>/dev/null; then
+            st OK "Fresh panel zip extracted"
+        else
+            st ERR "Could not fetch a current hkvm.zip — local app.js is outdated"
+            st INFO "Manual: rm -rf /root/hkvm && curl -fsSL $HN_BASE_URL/panel/hkvm.zip -o /tmp/hkvm.zip && unzip -o /tmp/hkvm.zip -d /root/hkvm"
+            st INFO "then re-run [1] Install"
+            pause; return 1
+        fi
+    fi
     st OK "Panel files ready (/root/hkvm/hkvm)"
 
     # purana Node `?.` parse nahi kar pata → SyntaxError → crash-loop. Service start se pehle pakdo
