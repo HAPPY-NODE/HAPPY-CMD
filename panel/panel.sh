@@ -182,6 +182,18 @@ nova_status() {
     echo -e "${R}● NOT INSTALLED${NC}"
 }
 
+omega_status() {
+    case "$(svc_disp omega-panel.service "/root/omega-panel/Omega-Panel-V3-main/app.py" /root/omega-panel/Omega-Panel-V3-main)" in
+        RUNNING)    echo -e "${G}● RUNNING${NC}" ;;
+        CRASH-LOOP) echo -e "${R}● CRASH-LOOP — run Install again${NC}" ;;
+        STARTING)   echo -e "${Y}● STARTING…${NC}" ;;
+        FAILED)     echo -e "${R}● FAILED — run Install again${NC}" ;;
+        STOPPED)    echo -e "${Y}● INSTALLED (stopped)${NC}" ;;
+        PARTIAL)    echo -e "${R}● PARTIAL — run Install again${NC}" ;;
+        *)          echo -e "${R}● NOT INSTALLED${NC}" ;;
+    esac
+}
+
 # ---------- Header ----------
 show_header() {
     clear
@@ -202,9 +214,10 @@ show_header() {
     echo -e "     ${GR}[10]${NC} ${GR}ᴘᴜꜰꜰᴇʀᴘᴀɴᴇʟ${NC}      ${DG}•${NC} $(pp_status)"
     echo -e "     ${GR}[11]${NC} ${GR}ᴊᴛɢ ᴘᴀɴᴇʟ${NC}         ${DG}•${NC} $(jtg_status)"
     echo -e "     ${GR}[12]${NC} ${GR}ɴᴏᴠᴀ ꜱᴛᴜᴅɪᴏ${NC}       ${DG}•${NC} $(nova_status)"
+    echo -e "     ${GR}[13]${NC} ${GR}ᴏᴍᴇɢᴀ ᴘᴀɴᴇʟ${NC}        ${DG}•${NC} $(omega_status)"
     echo -e "     ${FR}[0]${NC} ${FR}ʙᴀᴄᴋ${NC}"
     echo -e "  ${GY}────────────────────────────────────────────────────────────────${NC}"
-    echo -ne "  ${FC}➜${NC} ${FW}Enter Option${NC} ${SL}(0-12):${NC} "
+    echo -ne "  ${FC}➜${NC} ${FW}Enter Option${NC} ${SL}(0-13):${NC} "
 }
 
 # ---------- Run panel script ----------
@@ -233,6 +246,7 @@ while true; do
         10) run_panel "PufferPanel" "panel/pufferpanel.sh" ;;
         11) run_panel "JTG Panel" "panel/jtg.sh" ;;
         12) run_panel "Nova Studio" "panel/novastudio.sh" ;;
+        13) run_panel "Omega Panel" "panel/omegapanel.sh" ;;
         0) dots_load "Returning" 2; exit 0 ;;
         *) echo -e "  ${R}✗ Invalid option${NC}"; sleep 0.8 ;;
     esac
