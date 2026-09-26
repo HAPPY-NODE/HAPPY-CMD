@@ -41,11 +41,19 @@ ensure_node() {
     run_live "nodesource-dl" curl -fsSL https://deb.nodesource.com/setup_20.x -o /tmp/nodesource_setup.sh || true
     if [ -s /tmp/nodesource_setup.sh ]; then
         run_live "nodesource-setup" bash /tmp/nodesource_setup.sh || true
-        run_live "apt-node20" env DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs || true
+        # distro libnode-dev /usr/include/node ki files own karta hai → force-overwrite warna dpkg conflict
+        run_live "apt-node20" env DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::="--force-overwrite" install -y nodejs || true
+    fi
+    if ! node_ok && [ -s /tmp/nodesource_setup.sh ]; then
+        # pehla try fail (conflict/half-config state) → clean karke retry
+        st INFO "Cleaning conflicting distro packages (libnode-dev)..."
+        run_live "dpkg-fix" dpkg --configure -a || true
+        run_live "apt-node-rm" env DEBIAN_FRONTEND=noninteractive apt-get remove -y libnode-dev nodejs || true
+        run_live "apt-node20-retry" env DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::="--force-overwrite" install -y nodejs || true
     fi
     if node_ok; then st OK "Node $(node -v) ready"; return 0; fi
     st ERR "Node.js ≥16 could not be installed"
-    st INFO "Manual fix: curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt install -y nodejs"
+    st INFO "Manual fix: apt remove -y libnode-dev nodejs && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt install -y nodejs"
     st INFO "Then re-run [1] Install"
     return 1
 }
