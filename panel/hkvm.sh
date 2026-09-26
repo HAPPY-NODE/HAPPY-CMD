@@ -23,6 +23,33 @@ st() {
 }
 pause() { echo ""; read -rp "  Press Enter to continue... " _; }
 
+# Panel code modern JS use karta hai (?., ejs6, uuid14) — Node ≥16 chahiye
+node_ok() {
+    command -v node >/dev/null 2>&1 || return 1
+    local mj; mj="$(node -v 2>/dev/null | sed 's/^v//; s/\..*//')"
+    [ -n "$mj" ] && [ "$mj" -ge 16 ] 2>/dev/null
+}
+
+ensure_node() {
+    if node_ok; then st OK "Node $(node -v)"; return 0; fi
+    if command -v node >/dev/null 2>&1; then
+        st WARN "Node $(node -v 2>/dev/null) too old — panel needs Node ≥16"
+    else
+        st INFO "Node.js not installed"
+    fi
+    st WAIT "Installing Node.js 20 (NodeSource)..."
+    run_live "nodesource-dl" curl -fsSL https://deb.nodesource.com/setup_20.x -o /tmp/nodesource_setup.sh || true
+    if [ -s /tmp/nodesource_setup.sh ]; then
+        run_live "nodesource-setup" bash /tmp/nodesource_setup.sh || true
+        run_live "apt-node20" env DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs || true
+    fi
+    if node_ok; then st OK "Node $(node -v) ready"; return 0; fi
+    st ERR "Node.js ≥16 could not be installed"
+    st INFO "Manual fix: curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt install -y nodejs"
+    st INFO "Then re-run [1] Install"
+    return 1
+}
+
 show_creds_box() {
     local name="$1" url="$2"
     echo ""
@@ -64,16 +91,41 @@ fade_in() {
     printf "\n"
 }
 
+# systemd state pehle: crash-loop ko kabhi RUNNING mat dikhao
+svc_display_state() {
+    # $1=unit  $2=pgrep-pattern
+    local _st _nr
+    if [ -f "/etc/systemd/system/$1" ]; then
+        _st="$(systemctl is-active "$1" 2>/dev/null || true)"
+        case "$_st" in
+            active) echo "RUNNING" ;;
+            activating*|reloading*)
+                _nr="$(systemctl show -p NRestarts --value "$1" 2>/dev/null || echo 0)"
+                if [ "${_nr:-0}" -gt 0 ] 2>/dev/null; then echo "CRASH-LOOP"; else echo "STARTING"; fi ;;
+            failed) echo "FAILED" ;;
+            *)
+                if pgrep -f "$2" >/dev/null 2>&1; then echo "RUNNING"; else echo "STOPPED"; fi ;;
+        esac
+    elif pgrep -f "$2" >/dev/null 2>&1; then
+        echo "RUNNING"
+    elif [ -n "$3" ] && [ -d "$3" ]; then
+        echo "PARTIAL"
+    else
+        echo "NONE"
+    fi
+}
+
 show_header() {
     clear
     local status="${R}● NOT INSTALLED${NC}"
-    if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet hkvm.service 2>/dev/null; then
-        status="${G}● RUNNING${NC}"
-    elif pgrep -f "hkvm/hkvm/app.js|node app.js" >/dev/null 2>&1; then
-        status="${G}● RUNNING${NC}"
-    elif [ -d "/root/hkvm/hkvm" ]; then
-        status="${Y}● INSTALLED${NC}"
-    fi
+    case "$(svc_display_state hkvm.service "hkvm/hkvm/app.js|node app.js" /root/hkvm/hkvm)" in
+        RUNNING)   status="${G}● RUNNING${NC}" ;;
+        CRASH-LOOP) status="${R}● CRASH-LOOP — see menu [5]/[6]${NC}" ;;
+        STARTING)  status="${Y}● STARTING…${NC}" ;;
+        FAILED)    status="${R}● FAILED — see menu [5]/[6]${NC}" ;;
+        STOPPED)   status="${Y}● INSTALLED (stopped)${NC}" ;;
+        PARTIAL)   status="${R}● PARTIAL — run Install again${NC}" ;;
+    esac
     echo -e "  ${CB}╭──────────────────────────────────────────────╮${NC}"
     echo -e "  ${CB}│${W}      H K V M   P A N E L                     ${CB}│${NC}"
     echo -e "  ${CB}│${DG}    QEMU/KVM Manager  Port $PANEL_PORT               ${CB}│${NC}"
@@ -99,8 +151,12 @@ vps_check() {
 
     echo -e "  ${C}◆ VPS SUPPORT CHECK${NC}"
     if [ "$has_apt" = 1 ]; then st OK "OS tools (apt)"; else st ERR "No apt-get (Debian/Ubuntu)"; critical_ok=0; reasons+=("apt-get missing"); fi
-    if [ "$has_node" = 1 ]; then st OK "Node.js $(node -v 2>/dev/null)"; else st INFO "Node.js missing (will install)"; warn_ok=0; fi
-    if [ "$has_npm" = 1 ]; then st OK "npm"; else st INFO "npm missing (will install)"; warn_ok=0; fi
+    if [ "$has_node" = 1 ]; then
+        if node_ok; then st OK "Node.js $(node -v)"; else st INFO "Node.js $(node -v 2>/dev/null) — will upgrade to Node 20"; fi
+    else
+        st INFO "Node.js missing (will install)"
+    fi
+    if [ "$has_npm" = 1 ]; then st OK "npm"; else st INFO "npm missing (will install)"; fi
     if [ "$has_sys" = 1 ]; then st OK "systemd (PID 1)"; else st ERR "systemd not running"; critical_ok=0; reasons+=("systemd not PID 1"); fi
     if [ "$arch" = "x86_64" ] || [ "$arch" = "amd64" ]; then st OK "Arch: $arch"; else st WARN "Arch: $arch"; warn_ok=0; fi
     if [ "$has_kvm" = 1 ]; then st OK "KVM / virt (QEMU)"; else st WARN "No /dev/kvm — VM create may fail"; warn_ok=0; fi
@@ -138,7 +194,10 @@ vps_check() {
 
 install_hkvm() {
     show_header
-    if [ -d "/root/hkvm/hkvm" ] && pgrep -f "hkvm/hkvm/app.js|node app.js" >/dev/null 2>&1; then
+    # guard sirf tab skip jab service STABLY active ho — crash-loop me re-install hi repair hai
+    local _gst=""
+    [ -f /etc/systemd/system/hkvm.service ] && _gst="$(systemctl is-active hkvm.service 2>/dev/null || true)"
+    if [ -d "/root/hkvm/hkvm" ] && { [ "$_gst" = "active" ] || { [ -z "$_gst" ] && pgrep -f "hkvm/hkvm/app.js|node app.js" >/dev/null 2>&1; }; }; then
         st OK "HKVM Panel already installed & running."
         pause; return
     fi
@@ -162,7 +221,7 @@ install_hkvm() {
             pause; return
         }
     fi
-    command -v node >/dev/null 2>&1 && st OK "Node $(node -v)" || st WARN "node not found after install"
+    ensure_node || { pause; return; }
     command -v qemu-system-x86_64 >/dev/null 2>&1 && st OK "QEMU ready" || st WARN "QEMU missing — VM create may fail"
 
     mkdir -p /root/hkvm
@@ -188,8 +247,26 @@ install_hkvm() {
     fi
     st OK "Panel files ready (/root/hkvm/hkvm)"
 
+    # purana Node `?.` parse nahi kar pata → SyntaxError → crash-loop. Service start se pehle pakdo
+    st WAIT "Syntax check (Node $(node -v 2>/dev/null))..."
+    local sf s_out
+    for sf in /root/hkvm/hkvm/app.js /root/hkvm/hkvm/licenses.js; do
+        [ -f "$sf" ] || continue
+        if ! s_out="$(node --check "$sf" 2>&1)"; then
+            st ERR "Syntax error: ${sf##*/}"
+            printf '%s\n' "$s_out" | sed 's/^/       │ /'
+            st INFO "Node too old / file corrupted — re-run [1] Install"
+            pause; return 1
+        fi
+    done
+    st OK "Syntax OK"
+
     if [ -d /root/hkvm/hkvm/node_modules ] && [ -n "$(ls -A /root/hkvm/hkvm/node_modules 2>/dev/null)" ]; then
         st OK "node_modules present"
+        # node version badla ho to native sqlite3 rebuild karo (ABI match)
+        if ! (cd /root/hkvm/hkvm && run_live "npm-rebuild" npm rebuild sqlite3); then
+            st WARN "npm rebuild sqlite3 failed — next check will decide"
+        fi
     else
         st WAIT "npm install..."
         if ! (cd /root/hkvm/hkvm && run_live "npm" npm install --omit=dev --no-audit --no-fund); then
@@ -204,6 +281,18 @@ install_hkvm() {
             pause; return 1
         fi
         st OK "npm deps installed"
+    fi
+
+    # final gate: native module isi Node par load ho sake — warna service crash-loop
+    if [ "${HN_SKIP_NATIVE_CHECK:-0}" != 1 ]; then
+        st WAIT "Checking native modules (sqlite3)..."
+        if ! (cd /root/hkvm/hkvm && node -e "require('/root/hkvm/hkvm/node_modules/sqlite3');require('/root/hkvm/hkvm/node_modules/express')"); then
+            st ERR "Modules broken for Node $(node -v 2>/dev/null) — panel would crash"
+            st INFO "Fix: cd /root/hkvm/hkvm && rm -rf node_modules && npm install --omit=dev"
+            st INFO "Then re-run [1] Install"
+            pause; return 1
+        fi
+        st OK "Native modules OK"
     fi
 
     st WAIT "Writing systemd service..."
@@ -261,17 +350,38 @@ EOF
         systemctl daemon-reload
         systemctl enable hkvm.service >/dev/null 2>&1
         systemctl restart hkvm.service
-        sleep 3
-        if systemctl is-active --quiet hkvm.service 2>/dev/null; then
+        # is-active --quiet crash-loop me bhi 0 deta hai — state text + stability check chahiye
+        local waited=0 _st="" still=""
+        while [ "$waited" -lt 15 ]; do
+            _st="$(systemctl is-active hkvm.service 2>/dev/null || true)"
+            case "$_st" in
+                failed|inactive) break ;;
+                active)
+                    sleep 2
+                    still="$(systemctl is-active hkvm.service 2>/dev/null || true)"
+                    if [ "$still" = "active" ]; then _st="active"; break; fi
+                    _st="$still" ;;
+            esac
+            sleep 1; waited=$((waited+3))
+        done
+        if [ "$_st" = "active" ]; then
             st OK "HKVM Panel installed successfully!"
             echo -e "  ${W}URL:${NC}     http://$DOMAIN:$PANEL_PORT"
             [ "$DOMAIN" != "localhost" ] && echo -e "  ${W}Nginx:${NC}   http://$DOMAIN"
             echo -e "  ${W}Service:${NC} hkvm.service (active)"
             echo -e "  ${W}Path:${NC}    /root/hkvm/hkvm"
+            if ss -ltn 2>/dev/null | grep -q ":$PANEL_PORT "; then
+                st OK "Port $PANEL_PORT listening"
+            else
+                st WARN "Port $PANEL_PORT not detected yet — check menu [5]"
+            fi
             show_creds_box "HKVM" "http://$DOMAIN:$PANEL_PORT"
         else
-            st ERR "Service failed. Check: journalctl -u hkvm.service"
-            st INFO "Fallback: cd /root/hkvm/hkvm && PORT=$PANEL_PORT node app.js"
+            st ERR "Service failed (state: ${_st:-unknown}) — last journal lines:"
+            journalctl -u hkvm.service -n 12 --no-pager 2>/dev/null | tail -8 | sed 's/^/  /'
+            st INFO "Full log: journalctl -u hkvm.service -e"
+            st INFO "Manual: cd /root/hkvm/hkvm && node app.js"
+            st INFO "Fix the error above, then re-run [1] Install"
         fi
     else
         st WARN "No systemd — starting in background mode..."
@@ -285,7 +395,9 @@ EOF
             st INFO "Note: auto-start on reboot needs systemd"
             show_creds_box "HKVM" "http://$DOMAIN:$PANEL_PORT"
         else
-            st ERR "Start failed. Check: cat /var/log/hkvm.log"
+            st ERR "Start failed — last log lines:"
+            tail -8 /var/log/hkvm.log 2>/dev/null | sed 's/^/  /'
+            st INFO "Fix the error above, then re-run [1] Install"
         fi
     fi
     pause
@@ -294,7 +406,14 @@ EOF
 start_service() {
     show_header
     if command -v systemctl >/dev/null 2>&1 && systemctl start hkvm.service 2>/dev/null; then
-        st OK "Started (systemd)"
+        sleep 2
+        local _st="$(systemctl is-active hkvm.service 2>/dev/null || true)"
+        if [ "$_st" = "active" ]; then
+            st OK "Started (systemd)"
+        else
+            st ERR "Service crashed after start (state: ${_st:-unknown}) — last journal lines:"
+            journalctl -u hkvm.service -n 12 --no-pager 2>/dev/null | tail -8 | sed 's/^/  /'
+        fi
     elif pgrep -f "hkvm/hkvm/app.js|node app.js" >/dev/null 2>&1; then
         st INFO "Already running (background mode)"
     else
@@ -324,7 +443,14 @@ restart_service() {
     pkill -f "/root/hkvm/hkvm/app.js" 2>/dev/null
     sleep 1
     if command -v systemctl >/dev/null 2>&1 && [ "$(cat /proc/1/comm 2>/dev/null)" = "systemd" ] && systemctl start hkvm.service 2>/dev/null; then
-        st OK "Restarted (systemd)"
+        sleep 2
+        local _st="$(systemctl is-active hkvm.service 2>/dev/null || true)"
+        if [ "$_st" = "active" ]; then
+            st OK "Restarted (systemd)"
+        else
+            st ERR "Service crashed after restart (state: ${_st:-unknown}) — last journal lines:"
+            journalctl -u hkvm.service -n 12 --no-pager 2>/dev/null | tail -8 | sed 's/^/  /'
+        fi
     elif [ -f /root/hkvm/hkvm/app.js ]; then
         (cd /root/hkvm/hkvm && PORT=$PANEL_PORT HOST=0.0.0.0 nohup node app.js >/var/log/hkvm.log 2>&1 &)
         sleep 2

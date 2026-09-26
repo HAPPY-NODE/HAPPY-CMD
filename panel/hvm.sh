@@ -62,18 +62,41 @@ spinner() {
     done
 }
 
+# systemd state pehle: crash-loop ko kabhi RUNNING mat dikhao
+svc_display_state() {
+    # $1=unit  $2=pgrep-pattern  $3=install-dir
+    local _st _nr
+    if [ -f "/etc/systemd/system/$1" ]; then
+        _st="$(systemctl is-active "$1" 2>/dev/null || true)"
+        case "$_st" in
+            active) echo "RUNNING" ;;
+            activating*|reloading*)
+                _nr="$(systemctl show -p NRestarts --value "$1" 2>/dev/null || echo 0)"
+                if [ "${_nr:-0}" -gt 0 ] 2>/dev/null; then echo "CRASH-LOOP"; else echo "STARTING"; fi ;;
+            failed) echo "FAILED" ;;
+            *)
+                if pgrep -f "$2" >/dev/null 2>&1; then echo "RUNNING"; else echo "STOPPED"; fi ;;
+        esac
+    elif pgrep -f "$2" >/dev/null 2>&1; then
+        echo "RUNNING"
+    elif [ -n "$3" ] && [ -d "$3" ]; then
+        echo "PARTIAL"
+    else
+        echo "NONE"
+    fi
+}
+
 show_header() {
     clear
     local status="${R}● NOT INSTALLED${NC}"
-    systemctl is-active --quiet hvm.service 2>/dev/null && status="${G}● RUNNING${NC}"
-    if [ -f /etc/systemd/system/hvm.service ] && [ ! "$(systemctl is-active hvm.service 2>/dev/null)" = "active" ]; then
-        if systemctl is-failed --quiet hvm.service 2>/dev/null; then
-            status="${R}● FAILED — see menu [5]/[6]${NC}"
-        else
-            status="${Y}● INSTALLED (stopped)${NC}"
-        fi
-    fi
-    [ -d "/root/hvm/hvm" ] && [ ! -f /etc/systemd/system/hvm.service ] && status="${R}● PARTIAL — run Install again${NC}"
+    case "$(svc_display_state hvm.service "/root/hvm/hvm/hvm.py" /root/hvm/hvm)" in
+        RUNNING)   status="${G}● RUNNING${NC}" ;;
+        CRASH-LOOP) status="${R}● CRASH-LOOP — see menu [5]/[6]${NC}" ;;
+        STARTING)  status="${Y}● STARTING…${NC}" ;;
+        FAILED)    status="${R}● FAILED — see menu [5]/[6]${NC}" ;;
+        STOPPED)   status="${Y}● INSTALLED (stopped)${NC}" ;;
+        PARTIAL)   status="${R}● PARTIAL — run Install again${NC}" ;;
+    esac
     echo -e "  ${CB}╭──────────────────────────────────────────────╮${NC}"
     echo -e "  ${CB}│${W}     H V M   P A N E L                        ${CB}│${NC}"
     echo -e "  ${CB}│${DG}    LXC VPS Manager  Port 5000                ${CB}│${NC}"
@@ -84,7 +107,8 @@ show_header() {
 
 install_hvm() {
     show_header
-    if [ -d "/root/hvm/hvm" ] && systemctl is-active --quiet hvm.service 2>/dev/null; then
+    # sirf tab skip jab service STABLY active ho — crash-loop me re-install hi repair hai
+    if [ -d "/root/hvm/hvm" ] && [ "$(systemctl is-active hvm.service 2>/dev/null || true)" = "active" ]; then
         st OK "HVM Panel already installed & running."
         pause; return
     fi
@@ -165,7 +189,7 @@ install_hvm() {
     sleep 2
 
     st WAIT "Installing LXD via snap..."
-    run_live "snap-seed" snap wait system seed.loaded --timeout=120 || true
+    run_live "snap-seed" timeout 120 snap wait system seed.loaded || true
     if run_live "snap-lxd" snap install lxd; then
         st OK "LXD installed"
     else
@@ -348,8 +372,21 @@ EOF
         systemctl daemon-reload
         systemctl enable hvm.service >/dev/null 2>&1
         systemctl restart hvm.service
-        sleep 2
-        if systemctl is-active --quiet hvm.service 2>/dev/null; then
+        # state text + stability check (is-active --quiet crash-loop me bhi 0 deta hai)
+        local waited=0 _st="" still=""
+        while [ "$waited" -lt 15 ]; do
+            _st="$(systemctl is-active hvm.service 2>/dev/null || true)"
+            case "$_st" in
+                failed|inactive) break ;;
+                active)
+                    sleep 2
+                    still="$(systemctl is-active hvm.service 2>/dev/null || true)"
+                    if [ "$still" = "active" ]; then _st="active"; break; fi
+                    _st="$still" ;;
+            esac
+            sleep 1; waited=$((waited+3))
+        done
+        if [ "$_st" = "active" ]; then
             st OK "HVM Panel installed successfully!"
             echo -e "  ${W}URL:${NC}     http://$DOMAIN:5000"
             [ "$DOMAIN" != "localhost" ] && echo -e "  ${W}Nginx:${NC}   http://$DOMAIN"
@@ -363,10 +400,11 @@ EOF
                 echo -e "  ${FR}LXD pool missing — VPS create will fail (run: lxd init --auto)${NC}"
             fi
         else
-            st ERR "Service failed — last journal lines:"
+            st ERR "Service failed (state: ${_st:-unknown}) — last journal lines:"
             journalctl -u hvm.service -n 12 --no-pager 2>/dev/null | tail -8 | sed 's/^/  /'
             st INFO "Full log: journalctl -u hvm.service -e"
             st INFO "Manual: cd /root/hvm/hvm && python3 hvm.py"
+            st INFO "Fix the error above, then re-run [1] Install"
         fi
     else
         st WARN "No systemd — starting in background mode..."
@@ -389,7 +427,14 @@ EOF
 start_service() {
     show_header
     if command -v systemctl >/dev/null 2>&1 && systemctl start hvm.service 2>/dev/null; then
-        st OK "Started (systemd)"
+        sleep 2
+        local _st="$(systemctl is-active hvm.service 2>/dev/null || true)"
+        if [ "$_st" = "active" ]; then
+            st OK "Started (systemd)"
+        else
+            st ERR "Service crashed after start (state: ${_st:-unknown}) — last journal lines:"
+            journalctl -u hvm.service -n 12 --no-pager 2>/dev/null | tail -8 | sed 's/^/  /'
+        fi
     elif pgrep -f "/root/hvm/hvm/hvm.py" >/dev/null 2>&1; then
         st INFO "Already running (background mode)"
     else
@@ -419,7 +464,14 @@ restart_service() {
     systemctl stop hvm.service 2>/dev/null && was=1
     pkill -f "/root/hvm/hvm/hvm.py" 2>/dev/null && was=1
     if command -v systemctl >/dev/null 2>&1 && [ "$(cat /proc/1/comm 2>/dev/null)" = "systemd" ] && systemctl start hvm.service 2>/dev/null; then
-        st OK "Restarted (systemd)"
+        sleep 2
+        local _st="$(systemctl is-active hvm.service 2>/dev/null || true)"
+        if [ "$_st" = "active" ]; then
+            st OK "Restarted (systemd)"
+        else
+            st ERR "Service crashed after restart (state: ${_st:-unknown}) — last journal lines:"
+            journalctl -u hvm.service -n 12 --no-pager 2>/dev/null | tail -8 | sed 's/^/  /'
+        fi
     elif [ -f /root/hvm/hvm/hvm.py ]; then
         cd /root/hvm/hvm && PORT=5000 HOST=0.0.0.0 nohup python3 /root/hvm/hvm/hvm.py >/var/log/hvm.log 2>&1 &
         sleep 2

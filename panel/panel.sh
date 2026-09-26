@@ -87,46 +87,64 @@ panel_status() {
 }
 
 # dir bana hai but service/unit nahi = incomplete install (pehle ye bhi yellow dikhata tha = jhootha green)
-hkvm_status() {
-    if pgrep -f "hkvm/hkvm/app.js|node app.js" >/dev/null 2>&1; then
-        echo -e "${G}● RUNNING${NC}"
-    elif [ -f "/etc/systemd/system/hkvm.service" ] && systemctl is-failed --quiet hkvm.service 2>/dev/null; then
-        echo -e "${R}● FAILED — run Install again${NC}"
-    elif [ -f "/etc/systemd/system/hkvm.service" ]; then
-        echo -e "${Y}● INSTALLED (stopped)${NC}"
-    elif [ -d "/root/hkvm/hkvm" ]; then
-        echo -e "${R}● PARTIAL — run Install again${NC}"
+# systemd state pehle: crash-loop (activating + NRestarts>0) ko kabhi RUNNING mat dikhao
+svc_disp() {
+    # $1=unit  $2=pgrep-pattern  $3=install-dir
+    local _st _nr
+    if [ -f "/etc/systemd/system/$1" ]; then
+        _st="$(systemctl is-active "$1" 2>/dev/null || true)"
+        case "$_st" in
+            active) echo "RUNNING" ;;
+            activating*|reloading*)
+                _nr="$(systemctl show -p NRestarts --value "$1" 2>/dev/null || echo 0)"
+                if [ "${_nr:-0}" -gt 0 ] 2>/dev/null; then echo "CRASH-LOOP"; else echo "STARTING"; fi ;;
+            failed) echo "FAILED" ;;
+            *)
+                if pgrep -f "$2" >/dev/null 2>&1; then echo "RUNNING"; else echo "STOPPED"; fi ;;
+        esac
+    elif pgrep -f "$2" >/dev/null 2>&1; then
+        echo "RUNNING"
+    elif [ -n "$3" ] && [ -d "$3" ]; then
+        echo "PARTIAL"
     else
-        echo -e "${R}● NOT INSTALLED${NC}"
+        echo "NONE"
     fi
+}
+
+hkvm_status() {
+    case "$(svc_disp hkvm.service "hkvm/hkvm/app.js|node app.js" /root/hkvm/hkvm)" in
+        RUNNING)    echo -e "${G}● RUNNING${NC}" ;;
+        CRASH-LOOP) echo -e "${R}● CRASH-LOOP — run Install again${NC}" ;;
+        STARTING)   echo -e "${Y}● STARTING…${NC}" ;;
+        FAILED)     echo -e "${R}● FAILED — run Install again${NC}" ;;
+        STOPPED)    echo -e "${Y}● INSTALLED (stopped)${NC}" ;;
+        PARTIAL)    echo -e "${R}● PARTIAL — run Install again${NC}" ;;
+        *)          echo -e "${R}● NOT INSTALLED${NC}" ;;
+    esac
 }
 
 hvm_status() {
-    if pgrep -f "/root/hvm/hvm/hvm.py" >/dev/null 2>&1; then
-        echo -e "${G}● RUNNING${NC}"
-    elif [ -f "/etc/systemd/system/hvm.service" ] && systemctl is-failed --quiet hvm.service 2>/dev/null; then
-        echo -e "${R}● FAILED — run Install again${NC}"
-    elif [ -f "/etc/systemd/system/hvm.service" ]; then
-        echo -e "${Y}● INSTALLED (stopped)${NC}"
-    elif [ -d "/root/hvm/hvm" ]; then
-        echo -e "${R}● PARTIAL — run Install again${NC}"
-    else
-        echo -e "${R}● NOT INSTALLED${NC}"
-    fi
+    case "$(svc_disp hvm.service "/root/hvm/hvm/hvm.py" /root/hvm/hvm)" in
+        RUNNING)    echo -e "${G}● RUNNING${NC}" ;;
+        CRASH-LOOP) echo -e "${R}● CRASH-LOOP — run Install again${NC}" ;;
+        STARTING)   echo -e "${Y}● STARTING…${NC}" ;;
+        FAILED)     echo -e "${R}● FAILED — run Install again${NC}" ;;
+        STOPPED)    echo -e "${Y}● INSTALLED (stopped)${NC}" ;;
+        PARTIAL)    echo -e "${R}● PARTIAL — run Install again${NC}" ;;
+        *)          echo -e "${R}● NOT INSTALLED${NC}" ;;
+    esac
 }
 
 akvm_status() {
-    if pgrep -f "akvm.py" >/dev/null 2>&1; then
-        echo -e "${G}● RUNNING${NC}"
-    elif [ -f "/etc/systemd/system/akvm.service" ] && systemctl is-failed --quiet akvm.service 2>/dev/null; then
-        echo -e "${R}● FAILED — run Install again${NC}"
-    elif [ -f "/etc/systemd/system/akvm.service" ]; then
-        echo -e "${Y}● INSTALLED (stopped)${NC}"
-    elif [ -d "/opt/akvm" ]; then
-        echo -e "${R}● PARTIAL — run Install again${NC}"
-    else
-        echo -e "${R}● NOT INSTALLED${NC}"
-    fi
+    case "$(svc_disp akvm.service "akvm.py" /opt/akvm)" in
+        RUNNING)    echo -e "${G}● RUNNING${NC}" ;;
+        CRASH-LOOP) echo -e "${R}● CRASH-LOOP — run Install again${NC}" ;;
+        STARTING)   echo -e "${Y}● STARTING…${NC}" ;;
+        FAILED)     echo -e "${R}● FAILED — run Install again${NC}" ;;
+        STOPPED)    echo -e "${Y}● INSTALLED (stopped)${NC}" ;;
+        PARTIAL)    echo -e "${R}● PARTIAL — run Install again${NC}" ;;
+        *)          echo -e "${R}● NOT INSTALLED${NC}" ;;
+    esac
 }
 
 pp_status() {

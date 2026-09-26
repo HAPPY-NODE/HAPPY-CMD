@@ -55,16 +55,41 @@ spinner() {
     done
 }
 
+# systemd state pehle: crash-loop ko kabhi RUNNING mat dikhao
+svc_display_state() {
+    # $1=unit  $2=pgrep-pattern  $3=install-dir
+    local _st _nr
+    if [ -f "/etc/systemd/system/$1" ]; then
+        _st="$(systemctl is-active "$1" 2>/dev/null || true)"
+        case "$_st" in
+            active) echo "RUNNING" ;;
+            activating*|reloading*)
+                _nr="$(systemctl show -p NRestarts --value "$1" 2>/dev/null || echo 0)"
+                if [ "${_nr:-0}" -gt 0 ] 2>/dev/null; then echo "CRASH-LOOP"; else echo "STARTING"; fi ;;
+            failed) echo "FAILED" ;;
+            *)
+                if pgrep -f "$2" >/dev/null 2>&1; then echo "RUNNING"; else echo "STOPPED"; fi ;;
+        esac
+    elif pgrep -f "$2" >/dev/null 2>&1; then
+        echo "RUNNING"
+    elif [ -n "$3" ] && [ -d "$3" ]; then
+        echo "PARTIAL"
+    else
+        echo "NONE"
+    fi
+}
+
 show_header() {
     clear
     local status="${R}● NOT INSTALLED${NC}"
-    if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet akvm.service 2>/dev/null; then
-        status="${G}● RUNNING${NC}"
-    elif pgrep -f "akvm.py" >/dev/null 2>&1; then
-        status="${G}● RUNNING${NC}"
-    elif [ -d "$INSTALL_DIR" ]; then
-        status="${Y}● INSTALLED${NC}"
-    fi
+    case "$(svc_display_state akvm.service "akvm.py" "$INSTALL_DIR")" in
+        RUNNING)   status="${G}● RUNNING${NC}" ;;
+        CRASH-LOOP) status="${R}● CRASH-LOOP — see menu [5]/[6]${NC}" ;;
+        STARTING)  status="${Y}● STARTING…${NC}" ;;
+        FAILED)    status="${R}● FAILED — see menu [5]/[6]${NC}" ;;
+        STOPPED)   status="${Y}● INSTALLED (stopped)${NC}" ;;
+        PARTIAL)   status="${R}● PARTIAL — run Install again${NC}" ;;
+    esac
     echo -e "  ${CB}╭──────────────────────────────────────────────╮${NC}"
     echo -e "  ${CB}│${W}     A K V M   P A N E L                      ${CB}│${NC}"
     echo -e "  ${CB}│${DG}    KVM Manager  Port $PANEL_PORT                    ${CB}│${NC}"
@@ -127,7 +152,10 @@ vps_check() {
 
 install_akvm() {
     show_header
-    if [ -f "$INSTALL_DIR/akvm.py" ] && pgrep -f "akvm.py" >/dev/null 2>&1; then
+    # sirf tab skip jab service STABLY active ho — crash-loop me re-install hi repair hai
+    local _gst=""
+    [ -f /etc/systemd/system/akvm.service ] && _gst="$(systemctl is-active akvm.service 2>/dev/null || true)"
+    if [ -f "$INSTALL_DIR/akvm.py" ] && { [ "$_gst" = "active" ] || { [ -z "$_gst" ] && pgrep -f "akvm.py" >/dev/null 2>&1; }; }; then
         st OK "AKVM Panel already installed & running."
         pause; return
     fi
@@ -261,8 +289,21 @@ EOF
         systemctl daemon-reload
         systemctl enable akvm.service >/dev/null 2>&1
         systemctl restart akvm.service
-        sleep 3
-        if systemctl is-active --quiet akvm.service 2>/dev/null; then
+        # state text + stability check (is-active --quiet crash-loop me bhi 0 deta hai)
+        local waited=0 _st="" still=""
+        while [ "$waited" -lt 15 ]; do
+            _st="$(systemctl is-active akvm.service 2>/dev/null || true)"
+            case "$_st" in
+                failed|inactive) break ;;
+                active)
+                    sleep 2
+                    still="$(systemctl is-active akvm.service 2>/dev/null || true)"
+                    if [ "$still" = "active" ]; then _st="active"; break; fi
+                    _st="$still" ;;
+            esac
+            sleep 1; waited=$((waited+3))
+        done
+        if [ "$_st" = "active" ]; then
             st OK "AKVM Panel installed successfully!"
             echo -e "  ${W}URL:${NC}     http://$DOMAIN:$PANEL_PORT"
             [ "$DOMAIN" != "localhost" ] && echo -e "  ${W}Nginx:${NC}   http://$DOMAIN"
@@ -270,8 +311,11 @@ EOF
             echo -e "  ${W}Path:${NC}    $INSTALL_DIR"
             show_creds_box "AKVM" "http://$DOMAIN:$PANEL_PORT"
         else
-            st ERR "Service failed. Check: journalctl -u akvm.service"
-            st INFO "Fallback: cd $INSTALL_DIR && PORT=$PANEL_PORT $PY akvm.py"
+            st ERR "Service failed (state: ${_st:-unknown}) — last journal lines:"
+            journalctl -u akvm.service -n 12 --no-pager 2>/dev/null | tail -8 | sed 's/^/  /'
+            st INFO "Full log: journalctl -u akvm.service -e"
+            st INFO "Manual: cd $INSTALL_DIR && PORT=$PANEL_PORT $PY akvm.py"
+            st INFO "Fix the error above, then re-run [1] Install"
         fi
     else
         st WARN "No systemd — starting in background mode..."
@@ -296,7 +340,14 @@ start_service() {
     local PY="$INSTALL_DIR/venv/bin/python"
     [ -x "$PY" ] || PY="$(command -v python3)"
     if command -v systemctl >/dev/null 2>&1 && systemctl start akvm.service 2>/dev/null; then
-        st OK "Started (systemd)"
+        sleep 2
+        local _st="$(systemctl is-active akvm.service 2>/dev/null || true)"
+        if [ "$_st" = "active" ]; then
+            st OK "Started (systemd)"
+        else
+            st ERR "Service crashed after start (state: ${_st:-unknown}) — last journal lines:"
+            journalctl -u akvm.service -n 12 --no-pager 2>/dev/null | tail -8 | sed 's/^/  /'
+        fi
     elif pgrep -f "akvm.py" >/dev/null 2>&1; then
         st INFO "Already running (background mode)"
     else
@@ -328,7 +379,14 @@ restart_service() {
     pkill -f "${INSTALL_DIR}/akvm.py" 2>/dev/null
     sleep 1
     if command -v systemctl >/dev/null 2>&1 && [ "$(cat /proc/1/comm 2>/dev/null)" = "systemd" ] && systemctl start akvm.service 2>/dev/null; then
-        st OK "Restarted (systemd)"
+        sleep 2
+        local _st="$(systemctl is-active akvm.service 2>/dev/null || true)"
+        if [ "$_st" = "active" ]; then
+            st OK "Restarted (systemd)"
+        else
+            st ERR "Service crashed after restart (state: ${_st:-unknown}) — last journal lines:"
+            journalctl -u akvm.service -n 12 --no-pager 2>/dev/null | tail -8 | sed 's/^/  /'
+        fi
     elif [ -f "$INSTALL_DIR/akvm.py" ]; then
         (cd "$INSTALL_DIR" && PORT=$PANEL_PORT HOST=0.0.0.0 nohup "$PY" akvm.py >/var/log/akvm.log 2>&1 &)
         sleep 2
