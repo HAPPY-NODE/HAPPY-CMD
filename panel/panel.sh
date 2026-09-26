@@ -167,6 +167,17 @@ jtg_status() {
     fi
 }
 
+nova_status() {
+    local d
+    for d in vpanel-pro Mpanel dpanel apanel; do
+        if [ -d "/root/$d" ] || [ -d "$HOME/$d" ]; then
+            echo -e "${G}● INSTALLED${NC}"
+            return
+        fi
+    done
+    echo -e "${R}● NOT INSTALLED${NC}"
+}
+
 # ---------- Header ----------
 show_header() {
     clear
@@ -186,9 +197,10 @@ show_header() {
     echo -e "     ${GR}[9]${NC} ${GR}ᴍʏᴛʜɪᴄᴀʟᴅᴀꜱʜ${NC}    ${DG}•${NC} $(panel_status /var/www/mythicaldash)"
     echo -e "     ${GR}[10]${NC} ${GR}PufferPanel${NC}      ${DG}•${NC} $(pp_status)"
     echo -e "     ${GR}[11]${NC} ${GR}ᴊᴛɢ ᴘᴀɴᴇʟ${NC}         ${DG}•${NC} $(jtg_status)"
+    echo -e "     ${GR}[12]${NC} ${GR}ɴᴏᴠᴀ ꜱᴛᴜᴅɪᴏ${NC}       ${DG}•${NC} $(nova_status)"
     echo -e "     ${FR}[0]${NC} ${FR}ʙᴀᴄᴋ${NC}"
     echo -e "  ${GY}────────────────────────────────────────────────────────────────${NC}"
-    echo -ne "  ${FC}➜${NC} ${FW}Enter Option${NC} ${SL}(0-11):${NC} "
+    echo -ne "  ${FC}➜${NC} ${FW}Enter Option${NC} ${SL}(0-12):${NC} "
 }
 
 # ---------- Run panel script ----------
@@ -216,6 +228,7 @@ while true; do
         9) run_panel "MythicalDash" "panel/mythical.sh" ;;
         10) run_panel "PufferPanel" "panel/pufferpanel.sh" ;;
         11) run_panel "JTG Panel" "panel/jtg.sh" ;;
+        12) run_panel "Nova Studio" "panel/novastudio.sh" ;;
         0) dots_load "Returning" 2; exit 0 ;;
         *) echo -e "  ${R}✗ Invalid option${NC}"; sleep 0.8 ;;
     esac
