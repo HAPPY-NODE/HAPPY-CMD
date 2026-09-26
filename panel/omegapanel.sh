@@ -105,6 +105,13 @@ install_omega() {
     fi
 
     local virt osb critical_ok=1 warn_ok=1 reasons=()
+
+    # Pahle domain lo — install ke baad yahi URL milega (baaki sab panels jaisa)
+    echo -e "  ${C}◆ DOMAIN SETUP${NC}"
+    read -rp "  Enter your domain (or IP) [localhost]: " DOMAIN
+    DOMAIN="${DOMAIN:-localhost}"
+    st INFO "Domain: $DOMAIN  →  URL: http://$DOMAIN:$OMG_PORT"
+
     virt="$(systemd-detect-virt 2>/dev/null || echo unknown)"
     osb="$(uname -s 2>/dev/null || echo Linux)"
     local arch="$(uname -m 2>/dev/null || echo unknown)"
@@ -155,12 +162,6 @@ install_omega() {
         echo ""
     fi
 
-    echo -e "  ${C}◆ DOMAIN SETUP${NC}"
-    read -rp "  Enter your domain (or IP) [localhost]: " DOMAIN
-    DOMAIN="${DOMAIN:-localhost}"
-    st INFO "Domain: $DOMAIN  →  http://$DOMAIN:$OMG_PORT"
-
-    echo ""
     st WAIT "Repairing apt state (if a previous install failed)..."
     run_live "dpkg-configure" dpkg --configure -a || true
     run_live "apt-fix" env DEBIAN_FRONTEND=noninteractive apt-get -f install -y || true
