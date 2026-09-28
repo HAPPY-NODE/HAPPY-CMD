@@ -29,6 +29,12 @@ st() {
 }
 pause() { echo ""; read -rp "  Press Enter to continue... " _ || true; }
 
+# phase header — install ko clearly-labelled steps me todata hai (friendly UI)
+phase() {
+    echo ""
+    echo -e "  ${NL}◆ ${NW}$1${NC}"
+}
+
 dots_load() {
     local msg="$1" n="${2:-3}"
     printf "   %s" "$msg"
@@ -97,19 +103,29 @@ neon_ask_timeout() {
 
 # ---------- Version fetch / select (GitHub releases) ----------
 fetch_ptero_versions() {
-    local json
-    json=$(curl -sf --max-time 20 "https://api.github.com/repos/pterodactyl/panel/releases?per_page=20" 2>/dev/null) || return 1
-    if command -v python3 >/dev/null 2>&1; then
-        printf '%s' "$json" | python3 -c "
+    local json out=""
+    json=$(curl -sf --max-time 20 "https://api.github.com/repos/pterodactyl/panel/releases?per_page=30" 2>/dev/null) || json=""
+    if [ -n "$json" ]; then
+        if command -v python3 >/dev/null 2>&1; then
+            out=$(printf '%s' "$json" | python3 -c "
 import sys, json
-for r in json.load(sys.stdin):
-    if r.get('prerelease'): continue
-    t = r.get('tag_name', '')
-    if t.startswith('v'): print(t)
-" 2>/dev/null
-    else
-        printf '%s' "$json" | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4
+try:
+    for r in json.load(sys.stdin):
+        if r.get('prerelease'): continue
+        t = r.get('tag_name', '')
+        if t.startswith('v'): print(t)
+except Exception:
+    pass
+" 2>/dev/null)
+        fi
+        # python missing/broken ho to grep fallback (prereleases filter)
+        [ -z "$out" ] && out=$(printf '%s' "$json" | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4 | grep -viE 'alpha|beta|rc')
     fi
+    # API rate-limit/network fail ho to git tags (bina rate-limit) — kabhi list khali nahi
+    if [ -z "$out" ] && command -v git >/dev/null 2>&1; then
+        out=$(git ls-remote --tags --refs https://github.com/pterodactyl/panel.git 2>/dev/null | sed 's|.*refs/tags/||' | grep -E '^v[0-9]' | grep -viE 'alpha|beta|rc')
+    fi
+    printf '%s\n' "$out" | awk '!seen[$0]++' | sort -rV | head -30
 }
 
 # select_ptero_version VAR_NAME  -> sets VAR to chosen tag (or "latest")
@@ -121,17 +137,21 @@ select_ptero_version() {
         [ -n "$t" ] && tags+=("$t")
     done < <(fetch_ptero_versions 2>/dev/null) || true
     if [ ${#tags[@]} -eq 0 ]; then
-        echo -e "  ${NY}No versions found — using latest.${NC}"
+        echo -e "  ${NY}Version list fetch nahi hui — latest use hoga.${NC}"
         printf -v "$var" '%s' "latest"
         return
     fi
     for t in "${tags[@]}"; do
         i=$((i + 1))
-        echo -e "  ${SL}$i.${NC} ${NW}$t${NC}"
+        if [ "$i" = 1 ]; then
+            echo -e "  ${SL}$i.${NC} ${NW}$t${NC} ${G}← latest${NC}"
+        else
+            echo -e "  ${SL}$i.${NC} ${NW}$t${NC}"
+        fi
     done
     local max=${#tags[@]} choice=""
-    echo -ne "\n  ${NP}•${NC} ${NW}Select version [1-${max}]${NC} ${SL}[1 = latest]${NC}\n  ${SL}╰─>${NC} "
-    if ! read -t 15 -r choice; then
+    echo -ne "\n  ${NP}•${NC} ${NW}Select version [1-${max}]${NC} ${SL}[1 = latest, default]${NC}\n  ${SL}╰─>${NC} "
+    if ! read -t 30 -r choice; then
         choice=""
         echo ""
         echo -e "  ${NY}⌛ Timeout — using latest: ${NW}${tags[0]}${NC}"
@@ -179,13 +199,21 @@ install_ptero() {
     fi
 
     neon_ask "Panel Domain" "panel.yourdomain.com" DOMAIN
-    neon_ask "Admin Email" "admin@gmail.com" EMAIL
+    neon_ask "Admin Email (sirf login ID — mail log-mode me hai)" "admin@${DOMAIN}" EMAIL
+    [[ "$EMAIL" == *@* ]] || { st WARN "Email me @ chahiye — using admin@${DOMAIN}"; EMAIL="admin@${DOMAIN}"; }
     neon_ask "Admin Username" "admin" USERNAME
-    neon_ask_timeout "Admin Password" "admin" PASSWORD
+    local PASSWORD tries=0
+    while true; do
+        neon_ask "Admin Password (min 8 chars)" "admin123" PASSWORD
+        [ ${#PASSWORD} -ge 8 ] && break
+        tries=$((tries + 1))
+        st WARN "Password kam se kam 8 characters ka chahiye."
+        [ "$tries" -ge 3 ] && { st ERR "Password too short — aborting."; pause; return; }
+    done
     select_ptero_version version_PANEL
 
     echo -e "\n  ${NY}┌─[ REVIEW CONFIGURATION ]${NC}"
-    echo -e "  ${NY}│${NC} ${SL}Domain:${NC}   $DOMAIN"
+    echo -e "  ${NY}│${NC} ${SL}Domain:${NC}   https://$DOMAIN"
     echo -e "  ${NY}│${NC} ${SL}Email:${NC}    $EMAIL"
     echo -e "  ${NY}│${NC} ${SL}User:${NC}     $USERNAME"
     echo -e "  ${NY}│${NC} ${SL}Version:${NC}  $version_PANEL"
@@ -207,10 +235,12 @@ install_ptero() {
     local panel_dir="/var/www/pterodactyl"
 
     # ----- Base deps -----
+    phase "SYSTEM PACKAGES"
     install_steps "Base packages" curl ca-certificates gnupg unzip git tar sudo lsb-release openssl \
         || { st ERR "Base package install failed."; pause; return; }
 
     # ----- PHP repo (Ubuntu PPA / Debian SURY) -----
+    phase "PHP ${PHP_VERSION} + SERVICES"
     local OS
     OS=$(lsb_release -is 2>/dev/null | tr '[:upper:]' '[:lower:]')
     if [ "$OS" = "ubuntu" ]; then
@@ -244,6 +274,7 @@ install_ptero() {
     fi
 
     # ----- Download selected panel version -----
+    phase "PANEL FILES (${version_PANEL})"
     st WAIT "Preparing $panel_dir..."
     mkdir -p "$panel_dir" || { st ERR "Cannot create $panel_dir"; pause; return; }
     cd "$panel_dir" || { st ERR "cd failed"; pause; return; }
@@ -254,13 +285,24 @@ install_ptero() {
         ptero_url="https://github.com/pterodactyl/panel/releases/download/${version_PANEL}/panel.tar.gz"
     fi
     st WAIT "Downloading ${version_PANEL}..."
-    run_dl "panel.tar.gz" "$ptero_url" panel.tar.gz || { st ERR "Download failed (bad version?)."; pause; return; }
+    if ! run_dl "panel.tar.gz" "$ptero_url" panel.tar.gz; then
+        if [ "$version_PANEL" != "latest" ]; then
+            st WARN "Archive missing for ${version_PANEL} (404) — latest se retry..."
+            ptero_url="https://github.com/pterodactyl/panel/releases/latest/download/panel.tar.gz"
+            version_PANEL="latest"
+            run_dl "panel.tar.gz" "$ptero_url" panel.tar.gz || { st ERR "Download failed (network blocked / GitHub unreachable)."; pause; return; }
+        else
+            st ERR "Download failed (network blocked / GitHub unreachable)."
+            pause; return
+        fi
+    fi
     tar -xzf panel.tar.gz || { st ERR "Extract failed."; rm -f panel.tar.gz; pause; return; }
     rm -f panel.tar.gz
     [ -f artisan ] || { st ERR "Not a panel archive — aborting."; pause; return; }
     chmod -R 755 storage/* bootstrap/cache/ 2>/dev/null || true
 
     # ----- MariaDB -----
+    phase "DATABASE"
     local MYSQL_BIN DB_NAME=panel DB_USER=pterodactyl DB_PASS
     MYSQL_BIN="$(command -v mariadb || command -v mysql)"
     if [ -z "$MYSQL_BIN" ]; then
@@ -286,16 +328,43 @@ install_ptero() {
     grep -q "^QUEUE_CONNECTION=" .env && sed -i "s|QUEUE_CONNECTION=.*|QUEUE_CONNECTION=redis|" .env || echo "QUEUE_CONNECTION=redis" >> .env
     grep -q "^APP_ENVIRONMENT_ONLY=" .env && sed -i "s|APP_ENVIRONMENT_ONLY=.*|APP_ENVIRONMENT_ONLY=false|" .env || echo "APP_ENVIRONMENT_ONLY=false" >> .env
 
+    # ----- APP_KEY: composer/migrate/user se PEHLE set karo -----
+    # warna har artisan command "No application encryption key has been specified" deti hai
+    if ! grep -q '^APP_KEY=base64:' .env; then
+        local APPKEY="base64:$(openssl rand -base64 32 | tr -d '\n\r')"
+        if grep -q '^APP_KEY=' .env; then
+            sed -i "s|^APP_KEY=.*|APP_KEY=${APPKEY}|" .env
+        else
+            printf '\nAPP_KEY=%s\n' "$APPKEY" >> .env
+        fi
+        st OK "Encryption key (APP_KEY) generated"
+    fi
+
+    # ----- Panel settings (composer/migrate se pehle — sab commands sahi config dekhen) -----
+    grep -q "^RECAPTCHA_ENABLED=" .env && sed -i "s|RECAPTCHA_ENABLED=.*|RECAPTCHA_ENABLED=false|" .env || echo "RECAPTCHA_ENABLED=false" >> .env
+    grep -q "^APP_NAME=" .env && sed -i 's|APP_NAME=.*|APP_NAME="HAPPY-NODE"|' .env || echo 'APP_NAME="HAPPY-NODE"' >> .env
+    local TIMEZONE
+    TIMEZONE=$(timedatectl show --property=Timezone --value 2>/dev/null || echo "UTC")
+    grep -q "^APP_TIMEZONE=" .env && sed -i "s|APP_TIMEZONE=.*|APP_TIMEZONE=${TIMEZONE}|" .env || echo "APP_TIMEZONE=${TIMEZONE}" >> .env
+    grep -q "^MAIL_MAILER=" .env && sed -i "s|MAIL_MAILER=.*|MAIL_MAILER=log|" .env || echo "MAIL_MAILER=log" >> .env
+    grep -q "^MAIL_FROM_ADDRESS=" .env && sed -i "s|MAIL_FROM_ADDRESS=.*|MAIL_FROM_ADDRESS=\"noreply@${DOMAIN}\"|" .env || echo "MAIL_FROM_ADDRESS=\"noreply@${DOMAIN}\"" >> .env
+    grep -q "^MAIL_FROM_NAME=" .env && sed -i 's|MAIL_FROM_NAME=.*|MAIL_FROM_NAME="HAPPY-NODE"|' .env || echo 'MAIL_FROM_NAME="HAPPY-NODE"' >> .env
+    st OK "Panel settings applied (APP_NAME=HAPPY-NODE, mail=log mode)"
+
     # ----- App deps + key + migrations -----
+    phase "APPLICATION (composer + migrate)"
     st WAIT "Installing PHP dependencies (composer)..."
     local ok=1
     run_live "composer" env COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --optimize-autoloader || ok=0
+    st OK "Composer dependencies installed"
     run_live "app-key" php artisan key:generate --force || ok=0
     st WAIT "Running migrations..."
     run_live "migrate" php artisan migrate --seed --force || ok=0
     if [ "$ok" = 0 ]; then
-        st ERR "Composer/migrations reported errors — check output above."
-        st INFO "Continuing remaining steps (you can rerun via Update)..."
+        st ERR "Composer/migrations me errors — output upar dekho."
+        st INFO "Baaki steps chal rahe hain; baad me [3] Update se rerun kar sakte ho."
+    else
+        st OK "Migrations complete"
     fi
 
     # ----- Permissions + cron -----
@@ -383,18 +452,8 @@ EOF
     systemctl enable --now redis-server 2>/dev/null || true
     systemctl enable --now pteroq.service 2>/dev/null && st OK "Queue worker running" || st WARN "Queue worker enable failed"
 
-    # ----- Panel settings -----
+    # ----- Panel settings: pehle .env step me lag chuke hain (composer/migrate se pehle) -----
     cd "$panel_dir" || true
-    grep -q "^APP_ENVIRONMENT_ONLY=" .env && sed -i "s|APP_ENVIRONMENT_ONLY=.*|APP_ENVIRONMENT_ONLY=false|" .env || echo "APP_ENVIRONMENT_ONLY=false" >> .env
-    grep -q "^RECAPTCHA_ENABLED=" .env && sed -i "s|RECAPTCHA_ENABLED=.*|RECAPTCHA_ENABLED=false|" .env || echo "RECAPTCHA_ENABLED=false" >> .env
-    grep -q "^APP_NAME=" .env && sed -i 's|APP_NAME=.*|APP_NAME="HAPPY-NODE"|' .env || echo 'APP_NAME="HAPPY-NODE"' >> .env
-    local TIMEZONE
-    TIMEZONE=$(timedatectl show --property=Timezone --value 2>/dev/null || echo "UTC")
-    grep -q "^APP_TIMEZONE=" .env && sed -i "s|APP_TIMEZONE=.*|APP_TIMEZONE=${TIMEZONE}|" .env || echo "APP_TIMEZONE=${TIMEZONE}" >> .env
-    grep -q "^MAIL_MAILER=" .env && sed -i "s|MAIL_MAILER=.*|MAIL_MAILER=log|" .env || echo "MAIL_MAILER=log" >> .env
-    grep -q "^MAIL_FROM_ADDRESS=" .env && sed -i "s|MAIL_FROM_ADDRESS=.*|MAIL_FROM_ADDRESS=\"noreply@${DOMAIN}\"|" .env || echo "MAIL_FROM_ADDRESS=\"noreply@${DOMAIN}\"" >> .env
-    grep -q "^MAIL_FROM_NAME=" .env && sed -i 's|MAIL_FROM_NAME=.*|MAIL_FROM_NAME="HAPPY-NODE"|' .env || echo 'MAIL_FROM_NAME="HAPPY-NODE"' >> .env
-    st OK "Panel settings applied (APP_NAME=HAPPY-NODE, mail=log mode)"
 
     php artisan p:location:make --short=IN --long="India" >/dev/null 2>&1 || true
     run_live "view-clear" php artisan view:clear || true
@@ -403,11 +462,13 @@ EOF
     php artisan queue:restart >/dev/null 2>&1 || true
 
     # ----- Admin user (non-interactive flags — no survey prompt) -----
+    phase "ADMIN USER"
     st WAIT "Creating admin user..."
     if php artisan p:user:make -n --email="$EMAIL" --username="$USERNAME" --password="$PASSWORD" --admin=1 --name-first=HAPPY --name-last=NODE; then
         st OK "Admin user created"
     else
-        st ERR "Admin user creation failed — run [2] Users after fixing errors"
+        st ERR "Admin user creation failed — [2] Users se dobara try karo"
+        st INFO "Username/email unique hone chahiye, password 8+ chars."
     fi
 
     # ----- Report -----
@@ -476,8 +537,20 @@ update_panel() {
     read -rp "  Proceed? (y/N): " conf || conf=""
     [[ "$conf" =~ ^[Yy]$ ]] || { st INFO "Cancelled."; pause; return; }
     cd /var/www/pterodactyl || return
+
+    # ----- Broken installs repair: APP_KEY missing ho to yahin set karo -----
+    if [ -f .env ] && ! grep -q '^APP_KEY=base64:' .env; then
+        local APPKEY="base64:$(openssl rand -base64 32 | tr -d '\n\r')"
+        if grep -q '^APP_KEY=' .env; then
+            sed -i "s|^APP_KEY=.*|APP_KEY=${APPKEY}|" .env
+        else
+            printf '\nAPP_KEY=%s\n' "$APPKEY" >> .env
+        fi
+        st OK "Missing APP_KEY generated (repair)"
+    fi
+
     st WAIT "Maintenance mode..."
-    php artisan down
+    php artisan down || true
     local ptero_url
     if [ "$ver" = "latest" ]; then
         ptero_url="https://github.com/pterodactyl/panel/releases/latest/download/panel.tar.gz"
@@ -485,7 +558,16 @@ update_panel() {
         ptero_url="https://github.com/pterodactyl/panel/releases/download/${ver}/panel.tar.gz"
     fi
     st WAIT "Downloading $ver..."
-    run_dl "Pterodactyl panel.tar.gz" "$ptero_url" panel.tar.gz || { st ERR "Download failed"; php artisan up; pause; return; }
+    if ! run_dl "Pterodactyl panel.tar.gz" "$ptero_url" panel.tar.gz; then
+        if [ "$ver" != "latest" ]; then
+            st WARN "Archive missing for $ver (404) — latest se retry..."
+            ptero_url="https://github.com/pterodactyl/panel/releases/latest/download/panel.tar.gz"
+            ver="latest"
+            run_dl "Pterodactyl panel.tar.gz" "$ptero_url" panel.tar.gz || { st ERR "Download failed (network / GitHub unreachable)."; php artisan up; pause; return; }
+        else
+            st ERR "Download failed (network / GitHub unreachable)."; php artisan up; pause; return
+        fi
+    fi
     tar -xzf panel.tar.gz || { st ERR "Extract failed."; php artisan up; pause; return; }
     rm -f panel.tar.gz
     chmod -R 755 storage/* bootstrap/cache/ 2>/dev/null || true
@@ -548,7 +630,7 @@ EOF
     nginx -t 2>/dev/null && run_live "nginx-reload" systemctl reload nginx || { st ERR "nginx config test failed (check PHP version in config)."; pause; return; }
     echo ""
     st WAIT "Requesting SSL certificate..."
-    run_live "certbot" certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email || st ERR "Certbot failed (DNS not pointing?)."
+    run_live "certbot" certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email --no-eff-email || st ERR "Certbot failed (DNS not pointing?)."
     echo ""
     st OK "Domain ready: https://$DOMAIN"
     pause
