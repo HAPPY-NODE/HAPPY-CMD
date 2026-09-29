@@ -165,7 +165,7 @@ RestartSec=5
 Environment=PYTHONUNBUFFERED=1
 Environment=DISCORD_TOKEN=${DISCORD_TOKEN}
 Environment=MAIN_ADMIN_ID=${MAIN_ADMIN_ID}
-Environment=BOT_NAME=HAPPY NODE
+Environment="BOT_NAME=HAPPY NODE"
 Environment=BOT_DEVELOPER=HAPPY-NODE
 
 [Install]
@@ -174,6 +174,11 @@ EOF
 
     step "Reloading systemd daemon..."
     systemctl daemon-reload
+
+    step "Stopping old/duplicate bot instances (duplicate-reply guard)..."
+    pkill -f "/root/bot.py" 2>/dev/null || true
+    pkill -f "/root/happy-svm-bot/bot.py" 2>/dev/null || true
+    systemctl disable --now happy-svm-bot.service >/dev/null 2>&1 || true
 
     step "Starting bot service..."
     systemctl restart bot

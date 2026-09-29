@@ -25,6 +25,8 @@ load_dotenv()
 # Load environment variables
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN', '')
 BOT_NAME = os.getenv('BOT_NAME', 'HAPPY NODE')
+# Slug for container names / socket paths — lxc rejects names with spaces
+CONTAINER_PREFIX = re.sub(r'[^a-z0-9]+', '-', BOT_NAME.lower()).strip('-') or 'happy'
 PREFIX = os.getenv('PREFIX', '!')
 YOUR_SERVER_IP = os.getenv('YOUR_SERVER_IP', '127.0.0.1')
 
@@ -447,7 +449,7 @@ def create_embed(title, description="", color=0x1a1a1a):
         color=color
     )
     embed.set_thumbnail(url="https://i.postimg.cc/jdbphsXP/Chat-GPT-Image-Sep-23-2026-05-48-16-PM.png")
-    embed.set_footer(text=f"{BOT_NAME} VPS Manager v{BOT_VERSION} • {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+    embed.set_footer(text=f"{BOT_NAME} VPS Manager v{BOT_VERSION.lstrip('v')} • {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
                      icon_url="https://i.postimg.cc/jdbphsXP/Chat-GPT-Image-Sep-23-2026-05-48-16-PM.png")
     return embed
 
@@ -529,7 +531,7 @@ async def execute_lxc(container_name: str, command: str, timeout=120, node_id: O
         data = {"command": full_command}
         params = {"api_key": node["api_key"]}
         try:
-            response = requests.post(url, json=data, params=params, timeout=timeout)
+            response = await asyncio.to_thread(requests.post, url, json=data, params=params, timeout=timeout)
             
             # Try to get detailed error information
             try:
@@ -882,7 +884,7 @@ async def get_container_stats(container_name: str, node_id: Optional[int] = None
         data = {"container": container_name}
         params = {"api_key": node["api_key"]}
         try:
-            response = requests.post(url, json=data, params=params)
+            response = await asyncio.to_thread(requests.post, url, json=data, params=params, timeout=15)
             response.raise_for_status()
             return response.json()
         except Exception as e:
@@ -1123,11 +1125,11 @@ async def my_vps(ctx):
             name="🚀 Quick Actions",
             value=(
                 f"• `{PREFIX}manage` – Manage VPS\n"
-                f"• Contact an admin to request a VPS"
+                f"• Or tap **➕ Install VPS** below (admin only)"
             ),
             inline=False
         )
-        await ctx.send(embed=embed)
+        await ctx.send(embed=embed, view=QuickActionsView())
         return
 
     # ─── Embed ────────────────────────────────────────────────
@@ -1281,7 +1283,7 @@ class OSSelectView(discord.ui.View):
         if user_id not in vps_data:
             vps_data[user_id] = []
         vps_count = len(vps_data[user_id]) + 1
-        container_name = f"{BOT_NAME.lower()}-vps-{user_id}-{vps_count}"
+        container_name = f"{CONTAINER_PREFIX}-vps-{user_id}-{vps_count}"
         ram_mb = self.ram * 1024
         try:
             await execute_lxc(container_name, f"init {os_version} {container_name} -s {DEFAULT_STORAGE_POOL}", node_id=self.node_id)
@@ -1347,6 +1349,55 @@ class OSSelectView(discord.ui.View):
         except Exception as e:
             error_embed = create_error_embed("Creation Failed", f"Error: {str(e)}")
             await interaction.followup.send(embed=error_embed)
+
+class CtxShim:
+    """Minimal ctx stand-in so the create-flow views can run from a button/modal interaction."""
+    def __init__(self, interaction: discord.Interaction):
+        self.interaction = interaction
+        self.author = interaction.user
+        self.guild = interaction.guild
+        self.channel = interaction.channel
+
+    async def send(self, *args, **kwargs):
+        return await self.interaction.followup.send(*args, **kwargs)
+
+
+class SpecModal(discord.ui.Modal, title="VPS Specifications"):
+    ram = discord.ui.TextInput(label="RAM (GB)", placeholder="e.g. 2", max_length=3)
+    cpu = discord.ui.TextInput(label="CPU Cores", placeholder="e.g. 1", max_length=2)
+    disk = discord.ui.TextInput(label="Disk (GB)", placeholder="e.g. 20", max_length=5)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            ram_i = int(self.ram.value)
+            cpu_i = int(self.cpu.value)
+            disk_i = int(self.disk.value)
+            if ram_i <= 0 or cpu_i <= 0 or disk_i <= 0:
+                raise ValueError
+        except ValueError:
+            await interaction.response.send_message(embed=create_error_embed("Invalid Specs", "RAM, CPU and Disk must be positive integers."), ephemeral=True)
+            return
+        embed = create_info_embed("VPS Creation", f"Creating VPS for {interaction.user.mention} with {ram_i}GB RAM, {cpu_i} CPU cores, {disk_i}GB Disk.\nSelect node below.")
+        view = NodeSelectView(ram_i, cpu_i, disk_i, interaction.user, CtxShim(interaction))
+        await interaction.response.send_message(embed=embed, view=view)
+
+
+async def start_install_flow(interaction: discord.Interaction):
+    """Shared handler for ➕ Install VPS buttons (admin-only)."""
+    if str(interaction.user.id) not in main_admin_ids and str(interaction.user.id) not in admin_data.get("admins", []):
+        await interaction.response.send_message(embed=create_error_embed("Access Denied", "Only admins can create VPS. Contact an admin."), ephemeral=True)
+        return
+    await interaction.response.send_modal(SpecModal())
+
+
+class QuickActionsView(discord.ui.View):
+    """Buttons attached to No-VPS embeds."""
+    def __init__(self):
+        super().__init__(timeout=600)
+
+    @discord.ui.button(label="➕ Install VPS", style=discord.ButtonStyle.success)
+    async def install(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await start_install_flow(interaction)
 
 @bot.command(name='create')
 @is_admin()
@@ -1540,6 +1591,12 @@ class ManageView(discord.ui.View):
             reconnect_button = discord.ui.Button(label="🔌 Reconnect Tunnel", style=discord.ButtonStyle.primary)
             reconnect_button.callback = lambda inter: self.action_callback(inter, 'reconnect_tunnel')
             self.add_item(reconnect_button)
+            install_button = discord.ui.Button(label="➕ Install", style=discord.ButtonStyle.success)
+            install_button.callback = lambda inter: start_install_flow(inter)
+            uninstall_button = discord.ui.Button(label="🗑 Uninstall", style=discord.ButtonStyle.danger)
+            uninstall_button.callback = lambda inter: self.action_callback(inter, 'uninstall')
+            self.add_item(install_button)
+            self.add_item(uninstall_button)
 
     async def select_vps(self, interaction: discord.Interaction):
         if str(interaction.user.id) != self.user_id and not self.is_admin:
@@ -1560,7 +1617,11 @@ class ManageView(discord.ui.View):
             await interaction.response.send_message(embed=create_error_embed("No VPS Selected", "Please select a VPS first."), ephemeral=True)
             return
         actual_idx = self.actual_index if self.is_shared else self.indices[self.selected_index]
-        target_vps = vps_data[self.owner_id][actual_idx]
+        try:
+            target_vps = vps_data[self.owner_id][actual_idx]
+        except (KeyError, IndexError):
+            await interaction.response.send_message(embed=create_error_embed("VPS Not Found", "This VPS no longer exists. Run the command again."), ephemeral=True)
+            return
         suspended = target_vps.get('suspended', False)
         if suspended and not self.is_admin and action != 'stats':
             await interaction.response.send_message(embed=create_error_embed("Access Denied", "This VPS is suspended. Contact an admin to unsuspend."), ephemeral=True)
@@ -1620,6 +1681,65 @@ class ManageView(discord.ui.View):
 
             await interaction.response.send_message(embed=confirm_embed, view=ConfirmView(self, container_name, self.owner_id, actual_idx, ram_gb, cpu, storage_gb, node_id), ephemeral=True)
             return
+        if action == 'uninstall':
+            if suspended:
+                await interaction.response.send_message(embed=create_error_embed("Cannot Uninstall", "Unsuspend the VPS first."), ephemeral=True)
+                return
+            owner_id = self.owner_id
+            vps_idx = actual_idx
+            parent_view = self
+            confirm_embed = create_warning_embed("Uninstall Warning",
+                f"⚠️ **WARNING:** This will permanently delete VPS `{container_name}` — all data and port forwards will be destroyed.\n\n"
+                f"This action cannot be undone. Continue?")
+
+            class DeleteConfirmView(discord.ui.View):
+                def __init__(self):
+                    super().__init__(timeout=60)
+
+                @discord.ui.button(label="Confirm Delete", style=discord.ButtonStyle.danger)
+                async def confirm(self, inter: discord.Interaction, item: discord.ui.Button):
+                    await inter.response.defer(ephemeral=True)
+                    try:
+                        await execute_lxc(container_name, f"delete {container_name} --force", node_id=node_id)
+                    except Exception as e:
+                        err = str(e).lower()
+                        if not any(x in err for x in ["not found", "does not exist", "no such container"]):
+                            await inter.followup.send(embed=create_error_embed("Delete Failed", f"Error: {str(e)}"), ephemeral=True)
+                            return
+                    try:
+                        conn = get_db()
+                        cur = conn.cursor()
+                        cur.execute("DELETE FROM vps WHERE container_name = ?", (container_name,))
+                        cur.execute("DELETE FROM port_forwards WHERE vps_container = ?", (container_name,))
+                        conn.commit()
+                        conn.close()
+                    except Exception as e:
+                        logger.error(f"DB cleanup after uninstall failed: {e}")
+                    vps_list = vps_data.get(owner_id, [])
+                    if 0 <= vps_idx < len(vps_list):
+                        vps_list.pop(vps_idx)
+                        if not vps_list and owner_id in vps_data:
+                            del vps_data[owner_id]
+                            try:
+                                if inter.guild:
+                                    role = await get_or_create_vps_role(inter.guild)
+                                    member = await inter.guild.fetch_member(int(owner_id))
+                                    if role and role in member.roles:
+                                        await member.remove_roles(role, reason="No VPS ownership")
+                            except Exception as e:
+                                logger.warning(f"Failed to remove VPS role after uninstall: {e}")
+                    save_vps_data()
+                    await inter.followup.send(embed=create_success_embed("VPS Uninstalled", f"VPS `{container_name}` has been permanently deleted."), ephemeral=True)
+                    self.stop()
+
+                @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+                async def cancel(self, inter: discord.Interaction, item: discord.ui.Button):
+                    new_embed = await parent_view.create_vps_embed(parent_view.selected_index)
+                    await inter.response.edit_message(embed=new_embed, view=parent_view)
+                    self.stop()
+
+            await interaction.response.send_message(embed=confirm_embed, view=DeleteConfirmView(), ephemeral=True)
+            return
         if action == 'addport':
             owner_id = self.owner_id
 
@@ -1642,7 +1762,7 @@ class ManageView(discord.ui.View):
                         return
                     host_port = await create_port_forward(owner_id, container_name, vps_port, node_id)
                     if host_port:
-                        public_ip = get_public_ip()
+                        public_ip = await asyncio.to_thread(get_public_ip)
                         success_embed = create_success_embed("Port Forward Created", f"VPS port `{vps_port}` forwarded to host port `{host_port}` (TCP & UDP).")
                         add_field(success_embed, "Access", f"`{public_ip}:{host_port}` → VPS:{vps_port}", False)
                         await modal_inter.followup.send(embed=success_embed, ephemeral=True)
@@ -1695,7 +1815,7 @@ class ManageView(discord.ui.View):
                     await execute_lxc(container_name, f"exec {container_name} -- apt-get update -y", node_id=node_id)
                     await execute_lxc(container_name, f"exec {container_name} -- apt-get install tmate -y", node_id=node_id)
                     await interaction.followup.send(embed=create_success_embed("Installed", "SSH service installed!"), ephemeral=True)
-                session_name = f"{BOT_NAME.lower()}-session-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                session_name = f"{CONTAINER_PREFIX}-session-{datetime.now().strftime('%Y%m%d%H%M%S')}"
                 await execute_lxc(container_name, f"exec {container_name} -- tmate -S /tmp/{session_name}.sock new-session -d", node_id=node_id)
                 await asyncio.sleep(3)
                 ssh_output = await execute_lxc(container_name, f"exec {container_name} -- tmate -S /tmp/{session_name}.sock display -p '#{{tmate_ssh}}'", node_id=node_id)
@@ -1772,8 +1892,8 @@ async def manage_vps(ctx, user: discord.Member = None):
         vps_list = vps_data.get(user_id, [])
         if not vps_list:
             embed = create_error_embed("No VPS Found", f"You don't have any {BOT_NAME} VPS. Contact an admin to create one.")
-            add_field(embed, "Quick Actions", f"• `{PREFIX}manage` - Manage VPS\n• Contact admin for VPS creation", False)
-            await ctx.send(embed=embed)
+            add_field(embed, "Quick Actions", f"• `{PREFIX}manage` - Manage VPS\n• Tap **➕ Install VPS** below (admin only)", False)
+            await ctx.send(embed=embed, view=QuickActionsView())
             return
         view = ManageView(user_id, vps_list)
         embed = await view.get_initial_embed()
@@ -1786,7 +1906,10 @@ async def get_node_status(node_id: int) -> str:
     if node['is_local']:
         return "🟢 Online (Local)"
     try:
-        response = requests.get(f"{node['url']}/api/ping", params={'api_key': node['api_key']}, timeout=5)
+        response = await asyncio.to_thread(
+            requests.get, f"{node['url']}/api/ping",
+            params={'api_key': node['api_key']}, timeout=5
+        )
         if response.status_code == 200:
             return "🟢 Online"
         else:
@@ -1824,7 +1947,7 @@ async def get_host_stats(node_id: int) -> Dict:
         url = f"{node['url']}/api/get_host_stats"
         params = {"api_key": node["api_key"]}
         try:
-            response = requests.get(url, params=params, timeout=10)
+            response = await asyncio.to_thread(requests.get, url, params=params, timeout=10)
             response.raise_for_status()
             stats = response.json()
             # Fallbacks if remote API doesn't provide
@@ -2528,7 +2651,7 @@ async def system_status(ctx):
         else:
             # Check remote node status
             try:
-                response = requests.get(f"{node['url']}/api/ping", params={'api_key': node['api_key']}, timeout=5)
+                response = await asyncio.to_thread(requests.get, f"{node['url']}/api/ping", params={'api_key': node['api_key']}, timeout=5)
                 if response.status_code == 200:
                     status = "🟢 Online"
                     running_nodes += 1
@@ -2654,7 +2777,7 @@ async def status_summary(ctx):
             running_nodes += 1
         else:
             try:
-                response = requests.get(f"{node['url']}/api/ping", params={'api_key': node['api_key']}, timeout=3)
+                response = await asyncio.to_thread(requests.get, f"{node['url']}/api/ping", params={'api_key': node['api_key']}, timeout=3)
                 if response.status_code == 200:
                     running_nodes += 1
             except:
@@ -3169,7 +3292,7 @@ async def stop_all_vps(ctx):
                         url = f"{node['url']}/api/execute"
                         data = {"command": "lxc stop --all --force"}
                         params = {"api_key": node["api_key"]}
-                        response = requests.post(url, json=data, params=params)
+                        response = await asyncio.to_thread(requests.post, url, json=data, params=params, timeout=60)
                         if response.status_code != 200:
                             logger.error(f"Failed to stop all on node {node['name']}")
                             continue
@@ -3287,7 +3410,7 @@ async def resize_vps(ctx, container_name: str, ram: int = None, cpu: int = None,
 async def clone_vps(ctx, container_name: str, new_name: str = None):
     if not new_name:
         timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
-        new_name = f"{BOT_NAME.lower()}-{container_name}-clone-{timestamp}"
+        new_name = f"{CONTAINER_PREFIX}-{container_name}-clone-{timestamp}"
     node_id = find_node_id_for_container(container_name)
     await ctx.send(embed=create_info_embed("Cloning VPS", f"Cloning VPS `{container_name}` to `{new_name}`..."))
     try:
@@ -3340,7 +3463,7 @@ async def migrate_vps(ctx, container_name: str, target_node_id: int):
     await ctx.send(embed=create_info_embed("Migrating VPS", f"Migrating VPS `{container_name}` to node {target_node['name']}..."))
     try:
         await execute_lxc(container_name, f"stop {container_name}", node_id=node_id)
-        temp_name = f"{BOT_NAME.lower()}-{container_name}-temp-{int(time.time())}"
+        temp_name = f"{CONTAINER_PREFIX}-{container_name}-temp-{int(time.time())}"
         await execute_lxc(container_name, f"copy {container_name} {temp_name} -s {DEFAULT_STORAGE_POOL}", node_id=target_node_id)
         await execute_lxc(container_name, f"delete {container_name} --force", node_id=node_id)
         await execute_lxc(temp_name, f"rename {temp_name} {container_name}", node_id=target_node_id)
@@ -3412,7 +3535,7 @@ async def node_check(ctx, node_id: int):
         
         # Check remote API endpoint
         try:
-            test_response = requests.get(f"{node['url']}/api/ping", params={'api_key': node['api_key']}, timeout=5)
+            test_response = await asyncio.to_thread(requests.get, f"{node['url']}/api/ping", params={'api_key': node['api_key']}, timeout=5)
             add_field(embed, "🔌 API Endpoint", f"✅ Reachable\nURL: {node['url']}", False)
         except Exception as e:
             add_field(embed, "🔌 API Endpoint", f"❌ Unreachable\nError: {str(e)[:200]}", False)
@@ -3945,7 +4068,7 @@ async def node_cmd(ctx, sub: str, *args):
             status = "Local" if n['is_local'] else "Down"
             if not n['is_local']:
                 try:
-                    response = requests.get(f"{n['url']}/api/ping", params={'api_key': n['api_key']}, timeout=5)
+                    response = await asyncio.to_thread(requests.get, f"{n['url']}/api/ping", params={'api_key': n['api_key']}, timeout=5)
                     status = "Up" if response.status_code == 200 else "Down"
                 except:
                     pass
@@ -4137,11 +4260,11 @@ async def node_cmd(ctx, sub: str, *args):
             add_field(embed, "RAM Usage", f"{ram_usage:.1f}%", True)
         else:
             try:
-                response = requests.get(f"{node['url']}/api/ping", params={'api_key': node['api_key']}, timeout=5)
+                response = await asyncio.to_thread(requests.get, f"{node['url']}/api/ping", params={'api_key': node['api_key']}, timeout=5)
                 if response.status_code == 200:
                     status = "🟢 Online"
                     try:
-                        stats_response = requests.get(f"{node['url']}/api/get_host_stats", 
+                        stats_response = await asyncio.to_thread(requests.get, f"{node['url']}/api/get_host_stats", 
                                                     params={'api_key': node['api_key']}, 
                                                     timeout=5)
                         if stats_response.status_code == 200:
@@ -4454,6 +4577,28 @@ async def info_alias(ctx, user: discord.Member = None):
         await ctx.send(embed=create_error_embed("Access Denied", "This command requires admin privileges."))
 # Run the bot
 if __name__ == "__main__":
+    # Single-instance guard — a second process (manual run + systemd both up)
+    # would reply to every command twice/thrice. Shared path so even copies
+    # at different locations (/root/bot.py vs /root/happy-svm-bot/bot.py)
+    # cannot run together.
+    _lock_fh = None
+    for _lock_path in ("/var/lock/happy-svm-bot.lock", "/tmp/happy-svm-bot.lock"):
+        try:
+            _lock_fh = open(_lock_path, "w")
+            break
+        except OSError:
+            continue
+    if _lock_fh is not None:
+        try:
+            import fcntl
+            fcntl.flock(_lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _lock_fh.write(str(os.getpid()))
+            _lock_fh.flush()
+        except (IOError, OSError):
+            logger.error("Another bot instance is already running — exiting to prevent duplicate replies.")
+            raise SystemExit(1)
+        except ImportError:
+            pass  # non-POSIX platform — skip guard
     if DISCORD_TOKEN:
         bot.run(DISCORD_TOKEN)
     else:

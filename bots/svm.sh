@@ -220,6 +220,10 @@ EOF
         st INFO "Fix $BOT_HOME/.env, then: systemctl enable --now $UNIT"
         return 0
     fi
+    # Kill leftover manual/legacy instances so commands don't reply 2-3x
+    pkill -f "$BOT_HOME/bot.py" 2>/dev/null || true
+    pkill -f "/root/bot.py" 2>/dev/null || true
+    systemctl disable --now bot.service >/dev/null 2>&1 || true
     systemctl enable "$UNIT" >/dev/null 2>&1 || true
     systemctl restart "$UNIT" 2>/dev/null || st WARN "restart failed"
     sleep 1
