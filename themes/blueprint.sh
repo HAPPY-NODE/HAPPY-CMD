@@ -50,23 +50,33 @@ do_install() {
     st WAIT "Configuring Node.js + Yarn..."
     mkdir -p /etc/apt/keyrings
     curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg 2>/dev/null || true
-    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" > /etc/apt/sources.list.d/nodesource.list
-    run_live "nodesource" bash -c 'curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -' || true
+    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" > /etc/apt/sources.list.d/nodesource.list
+    run_live "apt-update" env DEBIAN_FRONTEND=noninteractive apt-get update -y -q || true
     run_live "nodejs" env DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs || true
-    run_live "yarn" npm i -g yarn || true
-    st OK "Node.js & Yarn ready"
+    if ! command -v node >/dev/null 2>&1; then
+        run_live "nodesource-setup" bash -c 'curl -fsSL https://deb.nodesource.com/setup_22.x | bash -' || true
+        run_live "nodejs" env DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs || true
+    fi
+    command -v npm >/dev/null 2>&1 && run_live "yarn" npm i -g yarn || true
+    command -v node >/dev/null 2>&1 && st OK "Node $(node -v) + Yarn ready" || st WARN "Node install nahi hua — panel asset build kaam nahi karega"
 
     st WAIT "Downloading Blueprint framework..."
     cd "$PT_DIR" || return 1
-    local DOWNLOAD_URL
-    DOWNLOAD_URL=$(curl -s https://api.github.com/repos/BlueprintFramework/framework/releases/latest | grep 'browser_download_url' | grep 'release.zip' | cut -d '"' -f 4)
+    local DOWNLOAD_URL httpcode
+    # 1) direct latest URL (API rate-limit se bachne ke liye) — 2) API fallback
+    DOWNLOAD_URL="https://github.com/BlueprintFramework/framework/releases/latest/download/release.zip"
+    httpcode=$(curl -sIL -o /dev/null -w "%{http_code}" --max-time 15 "$DOWNLOAD_URL" 2>/dev/null)
+    if [ "$httpcode" != "200" ]; then
+        DOWNLOAD_URL=$(curl -s --max-time 20 "https://api.github.com/repos/BlueprintFramework/framework/releases/latest" 2>/dev/null | grep 'browser_download_url' | grep 'release.zip' | head -1 | cut -d '"' -f 4)
+    fi
     if [ -z "$DOWNLOAD_URL" ]; then
-        st ERR "Could not resolve release URL"
+        st ERR "Could not resolve release URL (network / GitHub blocked?)"
         pause; return 1
     fi
     run_dl "Blueprint release.zip" "$DOWNLOAD_URL" "$PT_DIR/release.zip" || { st ERR "Download failed"; pause; return 1; }
-    run_live "unzip" unzip -o -q release.zip
+    run_live "unzip" unzip -o -q release.zip || { st ERR "Extract failed (corrupt zip?)"; rm -f release.zip; pause; return 1; }
     rm -f release.zip
+    [ -f "$PT_DIR/blueprint.sh" ] || { st ERR "blueprint.sh missing after extract — release layout badla?"; pause; return 1; }
     st OK "Files extracted"
 
     st WAIT "Generating configuration..."
@@ -79,9 +89,21 @@ EOF
     chown -R www-data:www-data "$PT_DIR" 2>/dev/null
     st OK "Config written"
 
+    # Official guide ka step: panel dir me JS deps (blueprint CLI yarn maangta hai)
+    if command -v yarn >/dev/null 2>&1; then
+        st WAIT "Installing panel JS dependencies (yarn)..."
+        run_live "yarn-install" yarn install || st WARN "yarn install me issues — assets stale ho sakte hain"
+    fi
+
     st WAIT "Running Blueprint installer..."
-    yes | bash "$PT_DIR/blueprint.sh"
-    st OK "Blueprint installation complete"
+    run_live "blueprint-install" bash -c "yes | bash '$PT_DIR/blueprint.sh'"
+    if command -v blueprint >/dev/null 2>&1; then
+        st OK "Blueprint installation complete ($(blueprint -version 2>/dev/null | head -1))"
+    else
+        st ERR "Installer chala par blueprint CLI available nahi (upar error dekho)"
+        st INFO "Retry: [1] Reinstall — ya phir se [1] Install chalao"
+        pause; return 1
+    fi
 }
 
 do_reinstall() {

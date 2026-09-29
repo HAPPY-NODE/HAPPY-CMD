@@ -187,18 +187,24 @@ ensure_blueprint() {
         st ERR "Panel not found at $pdir"
         return 1
     fi
-    local tmp url
+    local tmp url httpcode
     tmp=$(mktemp -d)
-    url=$(curl -s https://api.github.com/repos/BlueprintFramework/framework/releases/latest 2>/dev/null \
-        | grep 'browser_download_url' | grep 'release.zip' | head -1 | cut -d '"' -f 4)
+    # 1) direct latest URL (API rate-limit se bachne ke liye) — 2) API fallback
+    url="https://github.com/BlueprintFramework/framework/releases/latest/download/release.zip"
+    httpcode=$(curl -sIL -o /dev/null -w "%{http_code}" --max-time 15 "$url" 2>/dev/null)
+    if [ "$httpcode" != "200" ]; then
+        url=$(curl -s --max-time 20 "https://api.github.com/repos/BlueprintFramework/framework/releases/latest" 2>/dev/null \
+            | grep 'browser_download_url' | grep 'release.zip' | head -1 | cut -d '"' -f 4)
+    fi
     if [ -z "$url" ]; then
         rm -rf "$tmp"
-        st ERR "Could not resolve Blueprint release URL"
+        st ERR "Could not resolve Blueprint release URL (network / GitHub blocked?)"
         return 1
     fi
     run_dl "Blueprint framework" "$url" "$tmp/release.zip" || { rm -rf "$tmp"; return 1; }
     cd "$pdir" || { rm -rf "$tmp"; return 1; }
     run_live "extract" unzip -o -q "$tmp/release.zip" || { rm -rf "$tmp"; st ERR "Extract failed"; return 1; }
+    [ -f "$pdir/blueprint.sh" ] || { rm -rf "$tmp"; st ERR "blueprint.sh missing after extract"; return 1; }
     cat <<EOF > "$pdir/.blueprintrc"
 WEBUSER="www-data";
 OWNERSHIP="www-data:www-data";
