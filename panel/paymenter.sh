@@ -19,7 +19,7 @@ st() {
         WAIT) echo -e "  ${Y}⏳${NC} $2" ;;
     esac
 }
-pause() { echo ""; read -rp "  Press Enter to continue... " _; }
+pause() { echo ""; read -rp "  Press Enter to continue... " _ || true; }
 
 dots_load() {
     local msg="$1" n="${2:-3}"
@@ -74,10 +74,17 @@ FLUSH PRIVILEGES;
 SQL
     if [ $? -ne 0 ]; then st ERR "Database creation failed."; pause; return; fi
     st WAIT "Configuring .env..."
+    [ -f .env.example ] || { st ERR ".env.example missing — release incomplete"; pause; return; }
     cp -f .env.example .env
     sed -i "s/^DB_DATABASE=.*/DB_DATABASE=paymenter/" .env
     sed -i "s/^DB_USERNAME=.*/DB_USERNAME=paymenter/" .env
     sed -i "s|^DB_PASSWORD=.*|DB_PASSWORD=$DB_PASS|" .env
+    # vendor na ho to pehle composer — warna artisan commands fail
+    if [ ! -d vendor ]; then
+        run_live "composer" env COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --optimize-autoloader \
+            || { st ERR "composer install failed"; pause; return; }
+    fi
+    ensure_appkey /var/www/paymenter
     run_live "key:generate" php artisan key:generate --force
     php artisan storage:link 2>/dev/null
     st WAIT "Migrating database (this takes a while)..."
@@ -119,11 +126,15 @@ create_user() {
         pause; return
     fi
     cd /var/www/paymenter || return
+    ensure_appkey /var/www/paymenter
     st WAIT "Creating admin user..."
     local PASSWORD="$(openssl rand -base64 10)"
-    local EMAIL="admin@example.com"
-    php artisan tinker --execute="\App\Models\User::create(['first_name'=>'Admin','last_name'=>'User','email'=>'$EMAIL','password'=>bcrypt('$PASSWORD'),'role_id'=>1,'is_admin'=>1]);"
-    st OK "Password: $PASSWORD"
+    local EMAIL="admin$(openssl rand -hex 3)@example.com"
+    if php artisan tinker --execute="\App\Models\User::create(['first_name'=>'Admin','last_name'=>'User','email'=>'$EMAIL','password'=>bcrypt('$PASSWORD'),'role_id'=>1,'is_admin'=>1]);"; then
+        st OK "Admin created — Password: $PASSWORD  ($EMAIL)"
+    else
+        st ERR "tinker se fail — try: php artisan app:user:create"
+    fi
     pause
 }
 
@@ -135,13 +146,16 @@ update_panel() {
     fi
     st WAIT "Updating..."
     cd /var/www/paymenter || return
-    php artisan down
-    run_dl "paymenter.tar.gz" "https://github.com/paymenter/paymenter/releases/latest/download/paymenter.tar.gz" /tmp/paymenter.tar.gz && tar -xzf /tmp/paymenter.tar.gz || { st ERR "Download failed"; pause; return; }
-    chmod -R 755 storage/* bootstrap/cache/
-    php artisan migrate --force --seed
-    run_live "composer" env COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --optimize-autoloader
-    chown -R www-data:www-data /var/www/paymenter/*
-    php artisan up
+    ensure_appkey /var/www/paymenter
+    php artisan down || true
+    run_dl "paymenter.tar.gz" "https://github.com/paymenter/paymenter/releases/latest/download/paymenter.tar.gz" /tmp/paymenter.tar.gz && tar -xzf /tmp/paymenter.tar.gz || { st ERR "Download failed"; php artisan up; pause; return; }
+    chmod -R 755 storage/* bootstrap/cache/ 2>/dev/null || true
+    # naye release ke deps pehle (composer) — warna migrate missing class par fail hota
+    run_live "composer" env COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --optimize-autoloader || true
+    ensure_appkey /var/www/paymenter
+    php artisan migrate --force --seed || st ERR "migrate failed (see above)"
+    chown -R www-data:www-data /var/www/paymenter/* 2>/dev/null || true
+    php artisan up || true
     st OK "Updated."
     pause
 }
@@ -181,7 +195,7 @@ EOF
     nginx -t 2>/dev/null && run_live "nginx-reload" systemctl reload nginx || { st ERR "nginx config test failed."; pause; return; }
     echo ""
     st WAIT "Requesting SSL certificate..."
-    run_live "certbot" certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email || st ERR "Certbot failed (DNS not pointing?)."
+    run_live "certbot" certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email --no-eff-email || st ERR "Certbot failed (DNS not pointing?)."
     echo ""
     st OK "Domain ready: https://$DOMAIN"
     pause

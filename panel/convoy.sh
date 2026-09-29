@@ -60,9 +60,19 @@ install_convoy() {
     run_dl "Convoy panel.tar.gz" "https://github.com/convoypanel/panel/releases/latest/download/panel.tar.gz" panel.tar.gz || { st ERR "Download failed"; pause; return; }
     tar -xzf panel.tar.gz || { st ERR "Extract failed."; pause; return; }
     rm -f panel.tar.gz
-    chmod -R o+w storage/* bootstrap/cache/
+    chmod -R o+w storage/* bootstrap/cache/ 2>/dev/null || true
     # .env ke bina compose up boot hi nahi hota — example se banao
     [ -f .env ] || cp -f .env.example .env 2>/dev/null || true
+    # APP_KEY compose up se pehle — warna queue container crash-loop me chala jata hai
+    if [ -f .env ] && ! grep -q '^APP_KEY=base64:' .env; then
+        local APPKEY="base64:$(openssl rand -base64 32 | tr -d '\n\r')"
+        if grep -q '^APP_KEY=' .env; then
+            sed -i "s|^APP_KEY=.*|APP_KEY=${APPKEY}|" .env
+        else
+            printf '\nAPP_KEY=%s\n' "$APPKEY" >> .env
+        fi
+        st OK "Encryption key (APP_KEY) generated"
+    fi
     st WAIT "Starting containers..."
     run_live "docker-compose" docker compose up -d || { st ERR "docker compose up failed (check .env)"; pause; return; }
     echo ""
@@ -90,10 +100,10 @@ update_panel() {
     run_dl "Convoy panel.tar.gz" "https://github.com/convoypanel/panel/releases/latest/download/panel.tar.gz" panel.tar.gz || { st ERR "Download failed"; pause; return; }
     tar -xzf panel.tar.gz || { st ERR "Extract failed."; pause; return; }
     rm -f panel.tar.gz
-    chmod -R o+w storage/* bootstrap/cache/
+    chmod -R o+w storage/* bootstrap/cache/ 2>/dev/null || true
     run_live "composer" docker compose exec -T workspace bash -c "composer install --no-dev --optimize-autoloader"
-    docker compose exec -T workspace php artisan migrate --force
-    docker compose exec -T workspace php artisan up
+    docker compose exec -T workspace php artisan migrate --force || st ERR "migrate failed"
+    docker compose exec -T workspace php artisan up || true
     st OK "Updated."
     pause
 }

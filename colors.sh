@@ -176,35 +176,65 @@ ensure_sys_deps() {
     return 0
 }
 
+# Laravel panels: missing APP_KEY repair (composer/migrate/user se pehle call karo)
+# Usage: ensure_appkey /var/www/<panel>
+ensure_appkey() {
+    local dir="$1"
+    [ -n "$dir" ] && [ -f "$dir/.env" ] || return 0
+    grep -q '^APP_KEY=base64:' "$dir/.env" && return 0
+    local APPKEY="base64:$(openssl rand -base64 32 | tr -d '\n\r')"
+    if grep -q '^APP_KEY=' "$dir/.env"; then
+        sed -i "s|^APP_KEY=.*|APP_KEY=${APPKEY}|" "$dir/.env"
+    else
+        printf '\nAPP_KEY=%s\n' "$APPKEY" >> "$dir/.env"
+    fi
+    st OK "Missing APP_KEY generated (repair)"
+}
+
 # Auto-install Blueprint CLI if missing (non-interactive).
 # Usage: ensure_blueprint [panel_dir]
 ensure_blueprint() {
     command -v blueprint >/dev/null 2>&1 && return 0
     local pdir="${1:-/var/www/pterodactyl}"
-    st WARN "Blueprint CLI missing — auto-installing..."
-    ensure_sys_deps
     if [ ! -d "$pdir" ]; then
         st ERR "Panel not found at $pdir"
         return 1
     fi
-    local tmp url httpcode
+    st WARN "Blueprint CLI missing — auto-installing..."
+    ensure_sys_deps
+    if ! command -v unzip >/dev/null 2>&1; then
+        st ERR "unzip missing — apt install unzip karo"
+        return 1
+    fi
+    local tmp url code
     tmp=$(mktemp -d)
-    # 1) direct latest URL (API rate-limit se bachne ke liye) — 2) API fallback
+    # 1) direct latest URL — GitHub API rate-limit hi kyu na lage, ye hamesha chalta hai
     url="https://github.com/BlueprintFramework/framework/releases/latest/download/release.zip"
-    httpcode=$(curl -sIL -o /dev/null -w "%{http_code}" --max-time 15 "$url" 2>/dev/null)
-    if [ "$httpcode" != "200" ]; then
-        url=$(curl -s --max-time 20 "https://api.github.com/repos/BlueprintFramework/framework/releases/latest" 2>/dev/null \
+    code=$(curl -sIL -o /dev/null -w '%{http_code}' --max-time 20 "$url" 2>/dev/null)
+    if [ "$code" != "200" ]; then
+        # 2) API fallback
+        url=$(curl -s --max-time 20 https://api.github.com/repos/BlueprintFramework/framework/releases/latest 2>/dev/null \
             | grep 'browser_download_url' | grep 'release.zip' | head -1 | cut -d '"' -f 4)
     fi
     if [ -z "$url" ]; then
         rm -rf "$tmp"
-        st ERR "Could not resolve Blueprint release URL (network / GitHub blocked?)"
+        st ERR "Could not resolve Blueprint release URL (network/GitHub)"
         return 1
     fi
     run_dl "Blueprint framework" "$url" "$tmp/release.zip" || { rm -rf "$tmp"; return 1; }
+    # rate-limit/error page HTML na aaye — ZIP magic bytes check
+    if ! head -c 2 "$tmp/release.zip" 2>/dev/null | grep -q 'PK'; then
+        rm -rf "$tmp"
+        st ERR "Downloaded file is not a ZIP (GitHub rate-limit/HTML page?)"
+        return 1
+    fi
     cd "$pdir" || { rm -rf "$tmp"; return 1; }
     run_live "extract" unzip -o -q "$tmp/release.zip" || { rm -rf "$tmp"; st ERR "Extract failed"; return 1; }
-    [ -f "$pdir/blueprint.sh" ] || { rm -rf "$tmp"; st ERR "blueprint.sh missing after extract"; return 1; }
+    rm -rf "$tmp"
+    if [ ! -f "$pdir/blueprint.sh" ]; then
+        st ERR "blueprint.sh not found after extract — release structure changed?"
+        return 1
+    fi
     cat <<EOF > "$pdir/.blueprintrc"
 WEBUSER="www-data";
 OWNERSHIP="www-data:www-data";
@@ -213,11 +243,15 @@ EOF
     chmod +x "$pdir/blueprint.sh" 2>/dev/null
     chown -R www-data:www-data "$pdir" 2>/dev/null || true
     run_live "blueprint-install" bash -c "yes | bash '$pdir/blueprint.sh'" || true
-    rm -rf "$tmp"
+    # installer PATH me symlink na banaye to bhi blueprint chale
+    if ! command -v blueprint >/dev/null 2>&1; then
+        ln -sf "$pdir/blueprint.sh" /usr/local/bin/blueprint 2>/dev/null || true
+        hash -r 2>/dev/null || true
+    fi
     if command -v blueprint >/dev/null 2>&1; then
         st OK "Blueprint CLI ready"
         return 0
     fi
-    st ERR "Blueprint install incomplete — run Themes → [1] Blueprint"
+    st ERR "Blueprint install incomplete — output upar dekho (panel vendor/.env ready hona chahiye)"
     return 1
 }

@@ -19,7 +19,7 @@ st() {
         WAIT) echo -e "  ${Y}⏳${NC} $2" ;;
     esac
 }
-pause() { echo ""; read -rp "  Press Enter to continue... " _; }
+pause() { echo ""; read -rp "  Press Enter to continue... " _ || true; }
 
 dots_load() {
     local msg="$1" n="${2:-3}"
@@ -63,14 +63,19 @@ create_user() {
         pause; return
     fi
     cd /var/www/reviactyl || return
+    ensure_appkey /var/www/reviactyl
     st WAIT "Creating admin user..."
     local USERNAME="user$(openssl rand -hex 2)"
     local PASSWORD="$(openssl rand -base64 10)"
-    php artisan p:user:make -n \
-        --email="admin@example.com" --username="$USERNAME" \
+    local EMAIL="admin$(openssl rand -hex 3)@example.com"
+    if php artisan p:user:make -n \
+        --email="$EMAIL" --username="$USERNAME" \
         --password="$PASSWORD" --admin=1 \
-        --name-first=Admin --name-last=User
-    st OK "User: $USERNAME / $PASSWORD"
+        --name-first=Admin --name-last=User; then
+        st OK "User: $USERNAME / $PASSWORD  ($EMAIL)"
+    else
+        st ERR "User creation failed — panel status check karo"
+    fi
     pause
 }
 
@@ -82,17 +87,19 @@ update_panel() {
     fi
     st WAIT "Updating..."
     cd /var/www/reviactyl || return
-    php artisan down
+    ensure_appkey /var/www/reviactyl
+    php artisan down || true
     run_dl "Reviactyl panel.tar.gz" "https://github.com/reviactyl/panel/releases/latest/download/panel.tar.gz" /tmp/reviactyl_panel.tar.gz || { st ERR "Download failed — panel NOT wiped"; php artisan up; pause; return; }
     rm -rf /var/www/reviactyl/*
     tar -xzf /tmp/reviactyl_panel.tar.gz || { st ERR "Extract failed."; php artisan up; pause; return; }
     rm -f /tmp/reviactyl_panel.tar.gz
     chmod -R 755 storage/* bootstrap/cache/ 2>/dev/null || true
+    ensure_appkey /var/www/reviactyl
     local ok=1
     run_live "composer" env COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --optimize-autoloader || ok=0
     php artisan migrate --seed --force || ok=0
     chown -R www-data:www-data /var/www/reviactyl/* 2>/dev/null || true
-    php artisan up
+    php artisan up || true
     if [ "$ok" = 1 ]; then st OK "Updated."; else st ERR "Update finished with errors (see above)."; fi
     pause
 }
@@ -133,7 +140,7 @@ EOF
     nginx -t 2>/dev/null && run_live "nginx-reload" systemctl reload nginx || { st ERR "nginx config test failed."; pause; return; }
     echo ""
     st WAIT "Requesting SSL certificate..."
-    run_live "certbot" certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email || st ERR "Certbot failed (DNS not pointing?)."
+    run_live "certbot" certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email --no-eff-email || st ERR "Certbot failed (DNS not pointing?)."
     echo ""
     st OK "Domain ready: https://$DOMAIN"
     pause
